@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.github.wilx</groupId>
+    <artifactId>equinox-4.21-it</artifactId>
+    <version>@project.version@</version>
+    <packaging>pom</packaging>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.googlecode.maven-download-plugin</groupId>
+                <artifactId>download-maven-plugin</artifactId>
+                <version>1.6.8</version>
+                <configuration>
+                    <url>https://www.eclipse.org/downloads/download.php?file=/equinox/drops/R-4.21-202109060500/equinox-SDK-4.21.zip</url>
+                    <unpack>false</unpack>
+                    <outputDirectory>${project.build.directory}</outputDirectory>
+                    <outputFileName>equinox-SDK-4.21.zip</outputFileName>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>fetch-equinox</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>@project.groupId@</groupId>
+                <artifactId>@project.artifactId@</artifactId>
+                <version>@project.version@</version>
+                <configuration>
+                    <groupId>test.group</groupId>
+                    <equinoxSdkZipFile>${project.build.directory}/equinox-SDK-4.21.zip</equinoxSdkZipFile>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>equinox-mavenizer</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
