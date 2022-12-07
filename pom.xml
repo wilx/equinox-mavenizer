@@ -9,6 +9,22 @@
     <packaging>pom</packaging>
 
     <url>https://github.com/wilx/equinox-mavenizer</url>
+    <description>
+        Tools to help create Maven artifacts from Eclipse Equinox SDK ZIP file.
+    </description>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/wilx/equinox-mavenizer/issues</url>
+    </issueManagement>
+
+    <licenses>
+        <license>
+            <name>BSD 2-Clause License</name>
+            <url>https://raw.githubusercontent.com/wilx/equinox-mavenizer/master/LICENSE</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -16,6 +32,15 @@
         <maven.compiler.target>11</maven.compiler.target>
         <maven.compiler.release>11</maven.compiler.release>
     </properties>
+
+    <developers>
+        <developer>
+            <id>wilx</id>
+            <name>Václav Haisman</name>
+            <email>vhaisman@gmail.com</email>
+            <timezone>Europe/Prague</timezone>
+        </developer>
+    </developers>
 
     <dependencyManagement>
         <dependencies>
@@ -145,7 +170,34 @@
                     <artifactId>maven-invoker-plugin</artifactId>
                     <version>3.3.0</version>
                 </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>license-maven-plugin</artifactId>
+                    <version>2.0.0</version>
+                    <configuration>
+                        <verbose>true</verbose>
+                        <encoding>UTF-8</encoding>
+                        <inceptionYear>2022</inceptionYear>
+                        <projectName>Equinox Mavenizer</projectName>
+                        <organizationName>Václav Haisman</organizationName>
+                        <licenseName>bsd_2</licenseName>
+                    </configuration>
+                </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>update-project-license</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>
