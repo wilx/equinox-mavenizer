@@ -14,12 +14,6 @@
                 <groupId>com.googlecode.maven-download-plugin</groupId>
                 <artifactId>download-maven-plugin</artifactId>
                 <version>1.6.8</version>
-                <configuration>
-                    <url>https://www.eclipse.org/downloads/download.php?file=/equinox/drops/R-4.21-202109060500/equinox-SDK-4.21.zip</url>
-                    <unpack>false</unpack>
-                    <outputDirectory>${project.build.directory}</outputDirectory>
-                    <outputFileName>equinox-SDK-4.21.zip</outputFileName>
-                </configuration>
                 <executions>
                     <execution>
                         <id>fetch-equinox</id>
@@ -27,6 +21,12 @@
                         <goals>
                             <goal>wget</goal>
                         </goals>
+                        <configuration>
+                            <url>https://www.eclipse.org/downloads/download.php?file=/equinox/drops/R-4.21-202109060500/equinox-SDK-4.21.zip</url>
+                            <unpack>false</unpack>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <outputFileName>equinox-SDK-4.21.zip</outputFileName>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -36,7 +36,9 @@
                 <version>@project.version@</version>
                 <configuration>
                     <groupId>test.group</groupId>
-                    <equinoxSdkZipFile>${project.build.directory}/equinox-SDK-4.21.zip</equinoxSdkZipFile>
+                    <equinoxSdkZipFiles>
+                        <equinoxSdkZipFile>${project.build.directory}/equinox-SDK-4.21.zip</equinoxSdkZipFile>
+                    </equinoxSdkZipFiles>
                 </configuration>
                 <executions>
                     <execution>
