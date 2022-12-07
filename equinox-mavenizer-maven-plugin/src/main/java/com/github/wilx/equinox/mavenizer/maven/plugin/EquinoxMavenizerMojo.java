@@ -180,17 +180,13 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             boolean nlAfterDescOrName = false;
             final String sdkEntryName = sdkEntry.getName();
             if (StringUtils.isNotBlank(sdkEntryName)) {
-                xml.writeStartElement("name");
-                xml.writeCharacters(sdkEntryName);
-                xml.writeEndElement(); // name
+                writeTag(xml, sdkEntryName, "name");
                 nlAfterDescOrName = true;
             }
 
             final String sdkEntryDesc = sdkEntry.getDescription();
             if (StringUtils.isNotBlank(sdkEntryDesc)) {
-                xml.writeStartElement("description");
-                xml.writeCharacters(sdkEntryDesc);
-                xml.writeEndElement(); // description
+                writeTag(xml, sdkEntryDesc, "description");
                 nlAfterDescOrName = true;
             }
 
@@ -229,19 +225,19 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
+    private static void writeTag(IndentingXMLStreamWriter xml, String text, String tag) throws XMLStreamException {
+        xml.writeStartElement(tag);
+        xml.writeCharacters(text);
+        xml.writeEndElement(); // tag
+    }
+
     private void xmlWriteGav(IndentingXMLStreamWriter xml, String depGroupId, String depArtifactId, String depVersion)
         throws XMLStreamException {
-        xml.writeStartElement("groupId");
-        xml.writeCharacters(depGroupId);
-        xml.writeEndElement(); // groupId
+        writeTag(xml, depGroupId, "groupId");
 
-        xml.writeStartElement("artifactId");
-        xml.writeCharacters(depArtifactId);
-        xml.writeEndElement(); // artifactId
+        writeTag(xml, depArtifactId, "artifactId");
 
-        xml.writeStartElement("version");
-        xml.writeCharacters(depVersion);
-        xml.writeEndElement(); // version
+        writeTag(xml, depVersion, "version");
     }
 
     private void installArtifact(final SdkEntry sdkEntry) throws MojoExecutionException {
