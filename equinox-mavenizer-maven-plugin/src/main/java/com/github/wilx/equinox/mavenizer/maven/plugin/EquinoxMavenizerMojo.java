@@ -125,7 +125,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                         copyEntryIntoFile(sdkZipFile, sourceEntry, sourcesPath);
                     }
                 }
-            } catch (IOException e) {
+            } catch (final IOException e) {
                 throw new MojoExecutionException(e.getMessage(), e);
             }
         }
@@ -139,7 +139,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             try {
                 generatePomFile(mappedEntries, sdkEntry);
-            } catch (IOException e) {
+            } catch (final IOException e) {
                 throw new MojoExecutionException(e.getMessage(), e);
             }
         }
@@ -150,8 +150,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final Artifact bomArtifact = new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion)
                 .setFile(this.bomPath.toFile());
             try {
-                RepositorySystemSession repositorySystemSession = session.getRepositorySession();
-                InstallRequest installRequest = new InstallRequest();
+                final RepositorySystemSession repositorySystemSession = session.getRepositorySession();
+                final InstallRequest installRequest = new InstallRequest();
                 installRequest.addArtifact(bomArtifact);
                 this.repositorySystem.install(repositorySystemSession, installRequest);
             } catch (final InstallationException e) {
@@ -165,11 +165,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private void generateBom(Collection<SdkEntry> sdkEntries) throws MojoFailureException {
-        String numStr = String.format("%04d", artifactCounter++);
+    private void generateBom(final Collection<SdkEntry> sdkEntries) throws MojoFailureException {
+        final String numStr = String.format("%04d", artifactCounter++);
         this.bomPath = sdkArtifactsDirPath.resolve(numStr + "-bom.pom");
 
-        try (BufferedWriter writer = Files.newBufferedWriter(this.bomPath, StandardCharsets.UTF_8,
+        try (final BufferedWriter writer = Files.newBufferedWriter(this.bomPath, StandardCharsets.UTF_8,
             StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
 
@@ -204,14 +204,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private void generatePomFile(Map<String, SdkEntry> mappedEntries,
+    private void generatePomFile(final Map<String, SdkEntry> mappedEntries,
         final SdkEntry sdkEntry) throws IOException, MojoFailureException {
         final String artifactId = sdkEntry.getArtifactId();
-        String numStr = String.format("%04d", artifactCounter++);
+        final String numStr = String.format("%04d", artifactCounter++);
         final Path pomPath = sdkArtifactsDirPath.resolve(
             numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + ".pom");
         sdkEntry.setPomFile(pomPath);
-        try (BufferedWriter writer = Files.newBufferedWriter(pomPath, StandardCharsets.UTF_8, StandardOpenOption.WRITE,
+        try (final BufferedWriter writer = Files.newBufferedWriter(pomPath, StandardCharsets.UTF_8, StandardOpenOption.WRITE,
             StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
 
@@ -263,12 +263,12 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
             xml.writeEndDocument();
             xml.flush();
-        } catch (XMLStreamException e) {
+        } catch (final XMLStreamException e) {
             throw new MojoFailureException(e.getMessage(), e);
         }
     }
 
-    private static void xmlWritePomPreamble(IndentingXMLStreamWriter xml) throws XMLStreamException {
+    private static void xmlWritePomPreamble(final IndentingXMLStreamWriter xml) throws XMLStreamException {
         xml.writeStartDocument("UTF-8", "1.0");
 
         final String mavenUri = "http://maven.apache.org/POM/4.0.0";
@@ -289,18 +289,18 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     @NotNull
     private static IndentingXMLStreamWriter newIndentingXMLStreamWriter(
         @NotNull final BufferedWriter writer) throws XMLStreamException {
-        XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newFactory();
+        final XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newFactory();
         xmlOutputFactory.setProperty(XMLOutputFactory.IS_REPAIRING_NAMESPACES, true);
         return new IndentingXMLStreamWriter(xmlOutputFactory.createXMLStreamWriter(writer));
     }
 
-    private static void writeTag(IndentingXMLStreamWriter xml, String text, String tag) throws XMLStreamException {
+    private static void writeTag(final IndentingXMLStreamWriter xml, final String text, final String tag) throws XMLStreamException {
         xml.writeStartElement(tag);
         xml.writeCharacters(text);
         xml.writeEndElement(); // tag
     }
 
-    private void xmlWriteGav(IndentingXMLStreamWriter xml, String depGroupId, String depArtifactId, String depVersion)
+    private void xmlWriteGav(final IndentingXMLStreamWriter xml, final String depGroupId, final String depArtifactId, final String depVersion)
         throws XMLStreamException {
         writeTag(xml, depGroupId, "groupId");
         writeTag(xml, depArtifactId, "artifactId");
@@ -308,8 +308,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private void installArtifact(final SdkEntry sdkEntry) throws MojoExecutionException {
-        RepositorySystemSession repositorySystemSession = session.getRepositorySession();
-        InstallRequest installRequest = new InstallRequest();
+        final RepositorySystemSession repositorySystemSession = session.getRepositorySession();
+        final InstallRequest installRequest = new InstallRequest();
 
         final Artifact mainArtifact = new DefaultArtifact(this.groupId, sdkEntry.getArtifactId(), "jar",
             sdkEntry.getVersion()).setFile(sdkEntry.getArtifactPath().toFile());
@@ -335,8 +335,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private static void copyEntryIntoFile(ZipFile sdkZipFile, ZipArchiveEntry artifactEntry,
-        Path artifactPath) throws IOException {
+    private static void copyEntryIntoFile(final ZipFile sdkZipFile, final ZipArchiveEntry artifactEntry,
+        final Path artifactPath) throws IOException {
         LOGGER.info("Extracting {} as {}", artifactEntry.getName(), artifactPath);
         try (final InputStream zipEntryInputStream = sdkZipFile.getInputStream(artifactEntry);
              final InputStream inputStream = IOUtils.toBufferedInputStream(zipEntryInputStream, 0x10000);
@@ -347,7 +347,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private Map<String, SdkEntry> analyzeSdkArchive(final Map<String, SdkEntry> mappedEntries,
-        @NotNull Enumeration<ZipArchiveEntry> entries) {
+        @NotNull final Enumeration<ZipArchiveEntry> entries) {
         entries.asIterator().forEachRemaining(zae -> {
             if (zae.isDirectory() || zae.isUnixSymlink() || !zae.isStreamContiguous()) {
                 return;
@@ -357,14 +357,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         return mappedEntries;
     }
 
-    private static void analyzeOneEntry(Map<String, SdkEntry> mappedEntries, ZipArchiveEntry zae) {
-        String fileName = FilenameUtils.getName(zae.getName());
+    private static void analyzeOneEntry(final Map<String, SdkEntry> mappedEntries, final ZipArchiveEntry zae) {
+        final String fileName = FilenameUtils.getName(zae.getName());
         if (!fileName.endsWith(".jar") || !fileName.contains("_")) {
             return;
         }
 
         final String baseName = StringUtils.removeEnd(fileName, ".jar");
-        String[] parts = StringUtils.splitPreserveAllTokens(baseName, "_");
+        final String[] parts = StringUtils.splitPreserveAllTokens(baseName, "_");
         String artifactId;
         if (parts.length > 2) {
             artifactId = StringUtils.join(parts, "_", 0, parts.length - 1);
@@ -386,8 +386,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         sdkEntry.setVersion(version);
     }
 
-    private static void analyzeEntryMetadata(Map<String, SdkEntry> mappedEntries,
-        SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
+    private static void analyzeEntryMetadata(final Map<String, SdkEntry> mappedEntries,
+        final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
         final Path artifactPath = sdkEntry.getArtifactPath();
         try (final JarFile jarFile = new JarFile(artifactPath.toFile())) {
             final JarEntry manifestJarEntry = jarFile.getJarEntry(JarFile.MANIFEST_NAME);
@@ -498,7 +498,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     }
                 }
             }
-        } catch (IOException | BundleException e) {
+        } catch (final IOException | BundleException e) {
             throw new MojoExecutionException(e.getMessage(), e);
         }
     }
@@ -511,11 +511,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         Path artifactPath;
         Path sourcesPath;
         Path pomFile;
-        Set<String> dependencies = new TreeSet<>();
+        final Set<String> dependencies = new TreeSet<>();
         String description;
         String name;
 
-        public SdkEntry(String artifactId, String version) {
+        public SdkEntry(final String artifactId, final String version) {
             this.artifactId = artifactId;
             this.version = version;
         }
@@ -524,7 +524,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return artifactEntry;
         }
 
-        public void setArtifactEntry(ZipArchiveEntry artifactEntry) {
+        public void setArtifactEntry(final ZipArchiveEntry artifactEntry) {
             this.artifactEntry = artifactEntry;
         }
 
@@ -532,7 +532,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return sourcesEntry;
         }
 
-        public void setSourcesEntry(ZipArchiveEntry sourcesEntry) {
+        public void setSourcesEntry(final ZipArchiveEntry sourcesEntry) {
             this.sourcesEntry = sourcesEntry;
         }
 
@@ -540,7 +540,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return artifactId;
         }
 
-        public void setArtifactId(String artifactId) {
+        public void setArtifactId(final String artifactId) {
             this.artifactId = artifactId;
         }
 
@@ -548,7 +548,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return version;
         }
 
-        public void setVersion(String version) {
+        public void setVersion(final String version) {
             this.version = version;
         }
 
@@ -556,7 +556,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return artifactPath;
         }
 
-        public void setArtifactPath(Path artifactPath) {
+        public void setArtifactPath(final Path artifactPath) {
             this.artifactPath = artifactPath;
         }
 
@@ -564,11 +564,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return sourcesPath;
         }
 
-        public void setSourcesPath(Path sourcesPath) {
+        public void setSourcesPath(final Path sourcesPath) {
             this.sourcesPath = sourcesPath;
         }
 
-        public void addDependency(String dep) {
+        public void addDependency(final String dep) {
             this.dependencies.add(dep);
         }
 
@@ -580,7 +580,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return pomFile;
         }
 
-        public void setPomFile(Path pomFile) {
+        public void setPomFile(final Path pomFile) {
             this.pomFile = pomFile;
         }
 
@@ -588,7 +588,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return description;
         }
 
-        public void setDescription(String description) {
+        public void setDescription(final String description) {
             this.description = description;
         }
 
@@ -596,7 +596,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return name;
         }
 
-        public void setName(String name) {
+        public void setName(final String name) {
             this.name = name;
         }
     }
