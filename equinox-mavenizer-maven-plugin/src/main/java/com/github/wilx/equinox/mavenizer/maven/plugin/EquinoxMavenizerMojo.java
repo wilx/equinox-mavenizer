@@ -44,9 +44,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -57,7 +61,9 @@ import java.util.jar.JarFile;
 
 @Mojo(name = "equinox-mavenizer", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true)
 public class EquinoxMavenizerMojo extends AbstractMojo {
-    public static final String XSI_URL = "http://www.w3.org/2001/XMLSchema-instance";
+    private static final DateTimeFormatter BOM_VERSION_FMT = DateTimeFormatter.ofPattern("uuuuMMdd.HHmmss", Locale.US)
+                                                                              .withZone(ZoneId.of("UTC"));
+    private static final String XSI_URL = "http://www.w3.org/2001/XMLSchema-instance";
     private static final Logger LOGGER = LoggerFactory.getLogger(EquinoxMavenizerMojo.class);
 
     @Parameter(defaultValue = "${project}", required = true, readonly = true)
@@ -79,8 +85,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private List<File> equinoxSdkZipFiles;
 
     private Path sdkArtifactsDirPath;
-
     private int artifactCounter = 0;
+    private Path bomPath;
+    private final String bomVersion = BOM_VERSION_FMT.format(Instant.now());
 
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -137,9 +144,63 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             }
         }
 
+        // Generate BOM POM.
+        generateBom(mappedEntries.values());
+        if (this.bomPath != null) {
+            final Artifact bomArtifact = new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion)
+                .setFile(this.bomPath.toFile());
+            try {
+                RepositorySystemSession repositorySystemSession = session.getRepositorySession();
+                InstallRequest installRequest = new InstallRequest();
+                installRequest.addArtifact(bomArtifact);
+                this.repositorySystem.install(repositorySystemSession, installRequest);
+            } catch (final InstallationException e) {
+                throw new MojoExecutionException(e.getMessage(), e);
+            }
+        }
+
         // Install extracted JARs and generated POM files together.
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             installArtifact(sdkEntry);
+        }
+    }
+
+    private void generateBom(Collection<SdkEntry> sdkEntries) throws MojoFailureException {
+        String numStr = String.format("%04d", artifactCounter++);
+        this.bomPath = sdkArtifactsDirPath.resolve(numStr + "-bom.pom");
+
+        try (BufferedWriter writer = Files.newBufferedWriter(this.bomPath, StandardCharsets.UTF_8,
+            StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
+
+            xmlWritePomPreamble(xml);
+
+            xmlWriteGav(xml, this.groupId, "bom", this.bomVersion);
+
+            xml.writeCharacters("\n");
+
+            xml.writeStartElement("dependencyManagement");
+
+            xml.writeStartElement("dependencies");
+
+            for (final SdkEntry sdkEntry : sdkEntries) {
+                xml.writeStartElement("dependency");
+
+                xmlWriteGav(xml, this.groupId, sdkEntry.getArtifactId(), sdkEntry.getVersion());
+
+                xml.writeEndElement(); // dependency
+            }
+
+            xml.writeEndElement(); // dependencies
+
+            xml.writeEndElement(); // dependencyManagement
+
+            xml.writeEndElement(); // project
+
+            xml.writeEndDocument();
+            xml.flush();
+        } catch (final XMLStreamException | IOException e) {
+            throw new MojoFailureException(e.getMessage(), e);
         }
     }
 
@@ -152,26 +213,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         sdkEntry.setPomFile(pomPath);
         try (BufferedWriter writer = Files.newBufferedWriter(pomPath, StandardCharsets.UTF_8, StandardOpenOption.WRITE,
             StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newFactory();
-            xmlOutputFactory.setProperty(XMLOutputFactory.IS_REPAIRING_NAMESPACES, true);
-            final IndentingXMLStreamWriter xml = new IndentingXMLStreamWriter(
-                xmlOutputFactory.createXMLStreamWriter(writer));
+            final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
 
-            xml.writeStartDocument("UTF-8", "1.0");
-
-            final String mavenUri = "http://maven.apache.org/POM/4.0.0";
-            xml.setDefaultNamespace(mavenUri);
-            xml.setPrefix("xsi", XSI_URL);
-
-            xml.writeStartElement("project");
-            xml.writeAttribute(XSI_URL, "schemaLocation",
-                "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd");
-
-            xml.writeStartElement(mavenUri, "modelVersion");
-            xml.writeCharacters("4.0.0");
-            xml.writeEndElement();
-
-            xml.writeCharacters("\n");
+            xmlWritePomPreamble(xml);
 
             xmlWriteGav(xml, this.groupId, sdkEntry.getArtifactId(), sdkEntry.getVersion());
 
@@ -196,7 +240,6 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
             final Collection<String> dependencies = sdkEntry.getDependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
-                LOGGER.info("{} has dependencies: {}", artifactId, dependencies);
                 xml.writeStartElement("dependencies");
 
                 for (final String depArtifactId : dependencies) {
@@ -225,6 +268,32 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
+    private static void xmlWritePomPreamble(IndentingXMLStreamWriter xml) throws XMLStreamException {
+        xml.writeStartDocument("UTF-8", "1.0");
+
+        final String mavenUri = "http://maven.apache.org/POM/4.0.0";
+        xml.setDefaultNamespace(mavenUri);
+        xml.setPrefix("xsi", XSI_URL);
+
+        xml.writeStartElement("project");
+        xml.writeAttribute(XSI_URL, "schemaLocation",
+            "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd");
+
+        xml.writeStartElement(mavenUri, "modelVersion");
+        xml.writeCharacters("4.0.0");
+        xml.writeEndElement();
+
+        xml.writeCharacters("\n");
+    }
+
+    @NotNull
+    private static IndentingXMLStreamWriter newIndentingXMLStreamWriter(
+        @NotNull final BufferedWriter writer) throws XMLStreamException {
+        XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newFactory();
+        xmlOutputFactory.setProperty(XMLOutputFactory.IS_REPAIRING_NAMESPACES, true);
+        return new IndentingXMLStreamWriter(xmlOutputFactory.createXMLStreamWriter(writer));
+    }
+
     private static void writeTag(IndentingXMLStreamWriter xml, String text, String tag) throws XMLStreamException {
         xml.writeStartElement(tag);
         xml.writeCharacters(text);
@@ -234,9 +303,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private void xmlWriteGav(IndentingXMLStreamWriter xml, String depGroupId, String depArtifactId, String depVersion)
         throws XMLStreamException {
         writeTag(xml, depGroupId, "groupId");
-
         writeTag(xml, depArtifactId, "artifactId");
-
         writeTag(xml, depVersion, "version");
     }
 
@@ -299,10 +366,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         final String baseName = StringUtils.removeEnd(fileName, ".jar");
         String[] parts = StringUtils.splitPreserveAllTokens(baseName, "_");
         String artifactId;
-        LOGGER.info("parts: {}", parts);
         if (parts.length > 2) {
             artifactId = StringUtils.join(parts, "_", 0, parts.length - 1);
-            LOGGER.info("artifactId from more than two components: {}", artifactId);
         } else {
             artifactId = parts[0];
         }
