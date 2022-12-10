@@ -4,6 +4,7 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -15,9 +16,16 @@ class SdkEntry {
     Path artifactPath;
     Path sourcesPath;
     Path pomFile;
+    /**
+     * Artifact ID of the dependency.
+     */
     final Set<String> dependencies = new TreeSet<>();
     String description;
     String name;
+    final Set<String> importPackage = new TreeSet<>();
+    final Set<String> exportPackage = new TreeSet<>();
+    String bsn;
+    String fragmentHost;
 
     public SdkEntry(final String artifactId, final String version) {
         this.artifactId = artifactId;
@@ -102,5 +110,37 @@ class SdkEntry {
 
     public void setName(final String name) {
         this.name = name;
+    }
+
+    public Set<String> getImportPackage() {
+        return this.importPackage;
+    }
+
+    public void addImportPackage(final String ip) {
+        this.importPackage.add(ip);
+    }
+
+    public Set<String> getExportPackage() {
+        return this.exportPackage;
+    }
+
+    public void addExportPackage(final String ep) {
+        this.exportPackage.add(ep);
+    }
+
+    public String getBsn() {
+        return this.bsn;
+    }
+
+    public void setBsn(final String bsn) {
+        this.bsn = bsn;
+    }
+
+    public String getFragmentHost() {
+        return this.fragmentHost;
+    }
+
+    public void setFragmentHost(final String fragmentHost) {
+        this.fragmentHost = fragmentHost;
     }
 }

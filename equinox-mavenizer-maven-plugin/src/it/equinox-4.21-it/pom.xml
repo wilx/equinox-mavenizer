@@ -36,6 +36,10 @@
                 <version>@project.version@</version>
                 <configuration>
                     <groupId>test.group</groupId>
+                    <ignoredBsns>
+                        <ignoredBsn>org.eclipse.equinox.supplement</ignoredBsn>
+                        <irnoredBsn>org.eclipse.osgi.services</irnoredBsn>
+                    </ignoredBsns>
                     <equinoxSdkZipFiles>
                         <equinoxSdkZipFile>${project.build.directory}/equinox-SDK-4.21.zip</equinoxSdkZipFile>
                     </equinoxSdkZipFiles>

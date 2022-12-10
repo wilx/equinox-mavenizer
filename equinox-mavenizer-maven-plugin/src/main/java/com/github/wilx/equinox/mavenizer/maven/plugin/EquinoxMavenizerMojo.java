@@ -1,5 +1,7 @@
 package com.github.wilx.equinox.mavenizer.maven.plugin;
 
+import com.google.common.collect.SetMultimap;
+import com.google.common.collect.TreeMultimap;
 import com.sun.xml.txw2.output.IndentingXMLStreamWriter;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
@@ -31,7 +33,6 @@ import org.osgi.framework.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.text.html.Option;
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
 import java.io.BufferedWriter;
@@ -49,12 +50,15 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -66,6 +70,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                                                                               .withZone(ZoneId.of("UTC"));
     private static final String XSI_URL = "http://www.w3.org/2001/XMLSchema-instance";
     private static final Logger LOGGER = LoggerFactory.getLogger(EquinoxMavenizerMojo.class);
+    public static final ManifestElement[] EMPTY_MANIFEST_ELEMENTS = new ManifestElement[0];
 
     @Parameter(defaultValue = "${project}", required = true, readonly = true)
     private MavenProject project;
@@ -85,6 +90,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     @Parameter(property = "equinox-mavenizer.sdkZipFiles", required = true)
     private List<File> equinoxSdkZipFiles;
 
+    @Parameter
+    private Set<String> ignoredBsns;
+
     private Path sdkArtifactsDirPath;
     private int artifactCounter = 0;
     private Path bomPath;
@@ -92,9 +100,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
+        if (this.ignoredBsns == null) {
+            this.ignoredBsns = Collections.emptySet();
+        }
         this.sdkArtifactsDirPath = this.buildDir.toPath().resolve("sdkArtifacts");
 
+        // Map of artifactIds to SdkEntry records.
         final Map<String, SdkEntry> mappedEntries = new TreeMap<>();
+        final Map<String, SdkEntry> bsnMap = new TreeMap<>();
         for (final File equinoxSdkZipFile : this.equinoxSdkZipFiles) {
             try (final ZipFile sdkZipFile = new ZipFile(equinoxSdkZipFile)) {
                 final Enumeration<ZipArchiveEntry> entriesInPhysicalOrder = sdkZipFile.getEntriesInPhysicalOrder();
@@ -134,8 +147,56 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
 
         // Analyze metadata for dependencies.
+        {
+            final Collection<String> toRemoveArtifactId = new HashSet<>(10);
+            for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
+                final SdkEntry sdkEntry = entry.getValue();
+                if (!analyzeEntryMetadata(mappedEntries, bsnMap, sdkEntry)) {
+                    toRemoveArtifactId.add(entry.getKey());
+                }
+            }
+            toRemoveArtifactId.forEach(key -> {
+                LOGGER.info("Ignoring bundle {}", key);
+                mappedEntries.remove(key);
+            });
+        }
+
+        final SetMultimap<String, String> implementedBy = TreeMultimap.create();
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            analyzeEntryMetadata(mappedEntries, sdkEntry);
+            // Add dependency based on fragment host.
+            final String fragmentHost = sdkEntry.getFragmentHost();
+            if (fragmentHost != null) {
+                final SdkEntry hostSdkEntry = bsnMap.get(fragmentHost);
+                if (hostSdkEntry != null) {
+                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId());
+                }
+            }
+
+            // Map exports to providing artifactId.
+            final Set<String> exports = sdkEntry.getExportPackage();
+            final String artifactId = sdkEntry.getArtifactId();
+            for (final String e : exports) {
+                implementedBy.put(e, artifactId);
+            }
+        }
+
+        // Add dependencies based on exported and imported packages.
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            final Set<String> importPackage = sdkEntry.getImportPackage();
+            for (final String pkg : importPackage) {
+                final Set<String> artifactIds = implementedBy.get(pkg);
+                if (artifactIds != null && !artifactIds.isEmpty()) {
+                    if (artifactIds.size() > 1) {
+                        LOGGER.warn("Package {} implemented by multiple artifacts: {}", pkg, artifactIds);
+                        LOGGER.warn("Unable to record ambiguous dependency for {}", sdkEntry.getArtifactId());
+                    } else {
+                        final String implementorArtifactId = artifactIds.iterator().next();
+                        if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
+                            sdkEntry.addDependency(implementorArtifactId);
+                        }
+                    }
+                }
+            }
         }
 
         // Generate POM files with dependencies.
@@ -419,7 +480,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private static void analyzeEntryMetadata(final Map<String, SdkEntry> mappedEntries,
+    private boolean analyzeEntryMetadata(final Map<String, SdkEntry> mappedEntries,
+        final Map<String, SdkEntry> bsnMap,
         final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
         final Path artifactPath = sdkEntry.getArtifactPath();
         try (final JarFile jarFile = new JarFile(artifactPath.toFile())) {
@@ -435,19 +497,33 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             }
             final String symbolicNameStr = manifestMap.get(Constants.BUNDLE_SYMBOLICNAME);
             if (symbolicNameStr == null) {
-                return;
+                return false;
             }
             final ManifestElement[] symbolicNameElements = ManifestElement.parseHeader(Constants.BUNDLE_SYMBOLICNAME,
                 symbolicNameStr);
             final String symbolicName = symbolicNameElements[0].getValue();
+            if (this.ignoredBsns.contains(symbolicNameStr)) {
+                return false;
+            }
+            sdkEntry.setBsn(symbolicName);
+            bsnMap.put(symbolicName, sdkEntry);
 
-            final ManifestElement[] requireBundleElements = ManifestElement.parseHeader(Constants.REQUIRE_BUNDLE,
-                manifestMap.get(Constants.REQUIRE_BUNDLE));
+            final ManifestElement[] requireBundleElements = parseManifestHeader(manifestMap, Constants.REQUIRE_BUNDLE);
             if (requireBundleElements != null) {
                 for (final ManifestElement me : requireBundleElements) {
                     final String value = me.getValue();
                     sdkEntry.addDependency(value);
                 }
+            }
+
+            final ManifestElement[] importPackages = parseManifestHeader(manifestMap, Constants.IMPORT_PACKAGE);
+            for (final ManifestElement pkg : importPackages) {
+                sdkEntry.addImportPackage(pkg.getValue());
+            }
+
+            final ManifestElement[] exportPackages = parseManifestHeader(manifestMap, Constants.EXPORT_PACKAGE);
+            for (final ManifestElement pkg : exportPackages) {
+                sdkEntry.addExportPackage(pkg.getValue());
             }
 
             final Properties properties = loadAllPropertiesSources(jarFile);
@@ -464,20 +540,31 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     .ifPresent(sdkEntry::setDescription);
             }
 
-            final ManifestElement[] fragmentHostElements = ManifestElement.parseHeader(Constants.FRAGMENT_HOST,
-                manifestMap.get(Constants.FRAGMENT_HOST));
-            if (fragmentHostElements != null) {
+            final ManifestElement[] fragmentHostElements = parseManifestHeader(manifestMap,
+                Constants.FRAGMENT_HOST);
+            if (fragmentHostElements.length != 0) {
                 // Record dependency of the host bundle on this fragment.
                 final ManifestElement me = fragmentHostElements[0];
                 String fragmentHostBSN = me.getValue();
                 if (fragmentHostBSN.equals(Constants.SYSTEM_BUNDLE_SYMBOLICNAME)) {
                     fragmentHostBSN = EquinoxContainer.NAME;
                 }
-                final SdkEntry fragmentHostSdkEntry = mappedEntries.get(fragmentHostBSN);
-                fragmentHostSdkEntry.addDependency(symbolicName);
+                sdkEntry.setFragmentHost(fragmentHostBSN);
             }
         } catch (final IOException | BundleException e) {
             throw new MojoExecutionException(e.getMessage(), e);
+        }
+
+        return true;
+    }
+
+    private static ManifestElement[] parseManifestHeader(@NotNull final Map<String, String> manifestMap,
+        @NotNull final String header) throws BundleException {
+        final String value = manifestMap.get(header);
+        if (value != null) {
+            return ManifestElement.parseHeader(header, value);
+        } else {
+            return EMPTY_MANIFEST_ELEMENTS;
         }
     }
 }
