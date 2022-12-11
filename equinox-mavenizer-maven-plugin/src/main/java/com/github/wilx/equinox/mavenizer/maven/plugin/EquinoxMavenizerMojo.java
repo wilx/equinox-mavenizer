@@ -151,7 +151,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final Collection<String> toRemoveArtifactId = new HashSet<>(10);
             for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
                 final SdkEntry sdkEntry = entry.getValue();
-                if (!analyzeEntryMetadata(mappedEntries, bsnMap, sdkEntry)) {
+                if (!analyzeEntryMetadata(bsnMap, sdkEntry)) {
                     toRemoveArtifactId.add(entry.getKey());
                 }
             }
@@ -186,15 +186,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             for (final String pkg : importPackage) {
                 final Set<String> artifactIds = implementedBy.get(pkg);
                 if (artifactIds != null && !artifactIds.isEmpty()) {
-                    if (artifactIds.size() > 1) {
-                        LOGGER.warn("Package {} implemented by multiple artifacts: {}", pkg, artifactIds);
-                        LOGGER.warn("Unable to record ambiguous dependency for {}", sdkEntry.getArtifactId());
-                    } else {
-                        final String implementorArtifactId = artifactIds.iterator().next();
+                    artifactIds.forEach(implementorArtifactId -> {
                         if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
                             sdkEntry.addDependency(implementorArtifactId);
                         }
-                    }
+                    });
                 }
             }
         }
@@ -480,8 +476,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private boolean analyzeEntryMetadata(final Map<String, SdkEntry> mappedEntries,
-        final Map<String, SdkEntry> bsnMap,
+    private boolean analyzeEntryMetadata(final Map<String, SdkEntry> bsnMap,
         final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
         final Path artifactPath = sdkEntry.getArtifactPath();
         try (final JarFile jarFile = new JarFile(artifactPath.toFile())) {
@@ -519,6 +514,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final ManifestElement[] importPackages = parseManifestHeader(manifestMap, Constants.IMPORT_PACKAGE);
             for (final ManifestElement pkg : importPackages) {
                 sdkEntry.addImportPackage(pkg.getValue());
+            }
+            final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap,
+                Constants.DYNAMICIMPORT_PACKAGE);
+            for (final ManifestElement pkg : dynamicImportPackages) {
+                final String value = pkg.getValue();
+                if (!StringUtils.endsWith(value, "*")) {
+                    sdkEntry.addImportPackage(value);
+                }
             }
 
             final ManifestElement[] exportPackages = parseManifestHeader(manifestMap, Constants.EXPORT_PACKAGE);
