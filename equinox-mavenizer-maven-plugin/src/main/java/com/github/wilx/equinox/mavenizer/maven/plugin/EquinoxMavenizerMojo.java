@@ -108,6 +108,108 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         // Map of artifactIds to SdkEntry records.
         final Map<String, SdkEntry> mappedEntries = new TreeMap<>();
         final Map<String, SdkEntry> bsnMap = new TreeMap<>();
+        extractSdkJars(mappedEntries);
+
+        // Analyze metadata for dependencies.
+        analyzeMetadata(mappedEntries, bsnMap);
+
+        final SetMultimap<String, String> implementedBy = TreeMultimap.create();
+        analyzeDependencies(mappedEntries, bsnMap, implementedBy);
+
+        // Generate POM files with dependencies.
+        generatePomFiles(mappedEntries);
+
+        // Generate BOM POM.
+        generateBom(mappedEntries.values());
+        installBom();
+
+        // Install extracted JARs and generated POM files together.
+        installArtifacts(mappedEntries);
+    }
+
+    private void installArtifacts(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException {
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            installArtifact(sdkEntry);
+        }
+    }
+
+    private void installBom() throws MojoExecutionException {
+        if (this.bomPath != null) {
+            final Artifact bomArtifact = new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion)
+                .setFile(this.bomPath.toFile());
+            try {
+                final RepositorySystemSession repositorySystemSession = this.session.getRepositorySession();
+                final InstallRequest installRequest = new InstallRequest();
+                installRequest.addArtifact(bomArtifact);
+                this.repositorySystem.install(repositorySystemSession, installRequest);
+            } catch (final InstallationException e) {
+                throw new MojoExecutionException(e.getMessage(), e);
+            }
+        }
+    }
+
+    private void generatePomFiles(final Map<String, SdkEntry> mappedEntries) throws MojoFailureException, MojoExecutionException {
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            try {
+                generatePomFile(mappedEntries, sdkEntry);
+            } catch (final IOException e) {
+                throw new MojoExecutionException(e.getMessage(), e);
+            }
+        }
+    }
+
+    private static void analyzeDependencies(final Map<String, SdkEntry> mappedEntries, final Map<String, SdkEntry> bsnMap,
+        final SetMultimap<String, String> implementedBy) {
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            // Add dependency based on fragment host.
+            final String fragmentHost = sdkEntry.getFragmentHost();
+            if (fragmentHost != null) {
+                final SdkEntry hostSdkEntry = bsnMap.get(fragmentHost);
+                if (hostSdkEntry != null) {
+                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId());
+                }
+            }
+
+            // Map exports to providing artifactId.
+            final Set<String> exports = sdkEntry.getExportPackage();
+            final String artifactId = sdkEntry.getArtifactId();
+            for (final String e : exports) {
+                implementedBy.put(e, artifactId);
+            }
+        }
+
+        // Add dependencies based on exported and imported packages.
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            final Set<String> importPackage = sdkEntry.getImportPackage();
+            for (final String pkg : importPackage) {
+                final Set<String> artifactIds = implementedBy.get(pkg);
+                if (artifactIds != null && !artifactIds.isEmpty()) {
+                    artifactIds.forEach(implementorArtifactId -> {
+                        if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
+                            sdkEntry.addDependency(implementorArtifactId);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    private void analyzeMetadata(final Map<String, SdkEntry> mappedEntries,
+        final Map<String, SdkEntry> bsnMap) throws MojoExecutionException, MojoFailureException {
+        final Collection<String> toRemoveArtifactId = new HashSet<>(10);
+        for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
+            final SdkEntry sdkEntry = entry.getValue();
+            if (!analyzeEntryMetadata(bsnMap, sdkEntry)) {
+                toRemoveArtifactId.add(entry.getKey());
+            }
+        }
+        toRemoveArtifactId.forEach(key -> {
+            LOGGER.info("Ignoring bundle {}", key);
+            mappedEntries.remove(key);
+        });
+    }
+
+    private void extractSdkJars(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException {
         for (final File equinoxSdkZipFile : this.equinoxSdkZipFiles) {
             try (final ZipFile sdkZipFile = new ZipFile(equinoxSdkZipFile)) {
                 final Enumeration<ZipArchiveEntry> entriesInPhysicalOrder = sdkZipFile.getEntriesInPhysicalOrder();
@@ -144,84 +246,6 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             } catch (final IOException e) {
                 throw new MojoExecutionException(e.getMessage(), e);
             }
-        }
-
-        // Analyze metadata for dependencies.
-        {
-            final Collection<String> toRemoveArtifactId = new HashSet<>(10);
-            for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
-                final SdkEntry sdkEntry = entry.getValue();
-                if (!analyzeEntryMetadata(bsnMap, sdkEntry)) {
-                    toRemoveArtifactId.add(entry.getKey());
-                }
-            }
-            toRemoveArtifactId.forEach(key -> {
-                LOGGER.info("Ignoring bundle {}", key);
-                mappedEntries.remove(key);
-            });
-        }
-
-        final SetMultimap<String, String> implementedBy = TreeMultimap.create();
-        for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            // Add dependency based on fragment host.
-            final String fragmentHost = sdkEntry.getFragmentHost();
-            if (fragmentHost != null) {
-                final SdkEntry hostSdkEntry = bsnMap.get(fragmentHost);
-                if (hostSdkEntry != null) {
-                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId());
-                }
-            }
-
-            // Map exports to providing artifactId.
-            final Set<String> exports = sdkEntry.getExportPackage();
-            final String artifactId = sdkEntry.getArtifactId();
-            for (final String e : exports) {
-                implementedBy.put(e, artifactId);
-            }
-        }
-
-        // Add dependencies based on exported and imported packages.
-        for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            final Set<String> importPackage = sdkEntry.getImportPackage();
-            for (final String pkg : importPackage) {
-                final Set<String> artifactIds = implementedBy.get(pkg);
-                if (artifactIds != null && !artifactIds.isEmpty()) {
-                    artifactIds.forEach(implementorArtifactId -> {
-                        if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
-                            sdkEntry.addDependency(implementorArtifactId);
-                        }
-                    });
-                }
-            }
-        }
-
-        // Generate POM files with dependencies.
-        for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            try {
-                generatePomFile(mappedEntries, sdkEntry);
-            } catch (final IOException e) {
-                throw new MojoExecutionException(e.getMessage(), e);
-            }
-        }
-
-        // Generate BOM POM.
-        generateBom(mappedEntries.values());
-        if (this.bomPath != null) {
-            final Artifact bomArtifact = new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion)
-                .setFile(this.bomPath.toFile());
-            try {
-                final RepositorySystemSession repositorySystemSession = this.session.getRepositorySession();
-                final InstallRequest installRequest = new InstallRequest();
-                installRequest.addArtifact(bomArtifact);
-                this.repositorySystem.install(repositorySystemSession, installRequest);
-            } catch (final InstallationException e) {
-                throw new MojoExecutionException(e.getMessage(), e);
-            }
-        }
-
-        // Install extracted JARs and generated POM files together.
-        for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            installArtifact(sdkEntry);
         }
     }
 

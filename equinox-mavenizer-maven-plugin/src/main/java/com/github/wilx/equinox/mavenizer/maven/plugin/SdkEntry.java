@@ -4,7 +4,6 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 
 import java.nio.file.Path;
 import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
