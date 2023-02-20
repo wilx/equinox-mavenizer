@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.github.wilx</groupId>
-    <artifactId>equinox-4.21-it</artifactId>
+    <artifactId>equinox-p2-repository-it</artifactId>
     <version>@project.version@</version>
     <packaging>pom</packaging>
 
@@ -22,10 +22,17 @@
                             <goal>wget</goal>
                         </goals>
                         <configuration>
-                            <url>https://www.eclipse.org/downloads/download.php?file=/equinox/drops/R-4.21-202109060500/equinox-SDK-4.21.zip</url>
+                            <url>https://mirror.dogado.de/eclipse/eclipse/downloads/drops4/R-4.26-202211231800/repository-4.26.zip</url>
                             <unpack>false</unpack>
                             <outputDirectory>${project.build.directory}</outputDirectory>
-                            <outputFileName>equinox-SDK-4.21.zip</outputFileName>
+                            <outputFileName>repository-4.26.zip</outputFileName>
+                            <followRedirects>true</followRedirects>
+                            <overwrite>true</overwrite>
+                            <!-- skipCache>true</skipCache -->
+                            <headers>
+                                <User-Agent>Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15</User-Agent>
+                                <Referer>https://www.eclipse.org/</Referer>
+                            </headers>
                         </configuration>
                     </execution>
                 </executions>
@@ -37,11 +44,12 @@
                 <configuration>
                     <groupId>test.group</groupId>
                     <ignoredBsns>
+                        <ignoredBsn>slf4j.nop</ignoredBsn>
                         <ignoredBsn>org.eclipse.equinox.supplement</ignoredBsn>
                         <!-- irnoredBsn>org.eclipse.osgi.services</irnoredBsn -->
                     </ignoredBsns>
                     <equinoxSdkZipFiles>
-                        <equinoxSdkZipFile>${project.build.directory}/equinox-SDK-4.21.zip</equinoxSdkZipFile>
+                        <equinoxSdkZipFile>${project.build.directory}/repository-4.26.zip</equinoxSdkZipFile>
                     </equinoxSdkZipFiles>
                 </configuration>
                 <executions>

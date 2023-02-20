@@ -148,7 +148,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private void generatePomFiles(final Map<String, SdkEntry> mappedEntries) throws MojoFailureException, MojoExecutionException {
+    private void generatePomFiles(
+        final Map<String, SdkEntry> mappedEntries) throws MojoFailureException, MojoExecutionException {
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             try {
                 generatePomFile(mappedEntries, sdkEntry);
@@ -158,7 +159,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private static void analyzeDependencies(final Map<String, SdkEntry> mappedEntries, final Map<String, SdkEntry> bsnMap,
+    private static void analyzeDependencies(final Map<String, SdkEntry> mappedEntries,
+        final Map<String, SdkEntry> bsnMap,
         final SetMultimap<String, String> implementedBy) {
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             // Add dependency based on fragment host.
@@ -184,6 +186,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             for (final String pkg : importPackage) {
                 final Set<String> artifactIds = implementedBy.get(pkg);
                 if (artifactIds != null && !artifactIds.isEmpty()) {
+                    if (artifactIds.size() > 1) {
+                        // There can be split packages which are both imported and exported in multiple bundles.
+                        // To avoid cycles in dependencies, ignore these here and do not add a dependency.
+                        continue;
+                    }
                     artifactIds.forEach(implementorArtifactId -> {
                         if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
                             sdkEntry.addDependency(implementorArtifactId);
@@ -325,6 +332,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
             final Collection<String> dependencies = sdkEntry.getDependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
+                xml.writeCharacters("\n");
+                xml.writeComment("These dependencies are best effort generated dependencies.");
+                xml.writeCharacters("\n");
+                xml.writeComment("They are not necessarily complete.");
+
                 xml.writeStartElement("dependencies");
 
                 for (final String depArtifactId : dependencies) {
@@ -435,8 +447,13 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     private Map<String, SdkEntry> analyzeSdkArchive(final Map<String, SdkEntry> mappedEntries,
         @NotNull final Enumeration<ZipArchiveEntry> entries) {
+        final boolean debugEnabled = LOGGER.isDebugEnabled();
         entries.asIterator().forEachRemaining(zae -> {
-            if (zae.isDirectory() || zae.isUnixSymlink() || !zae.isStreamContiguous()) {
+            if (zae.isDirectory() || zae.isUnixSymlink() || !zae.isStreamContiguous()
+                || !zae.getName().startsWith("plugins/")) {
+                if (debugEnabled) {
+                    LOGGER.debug("Skipping archive entry {}", zae.getName());
+                }
                 return;
             }
             analyzeOneEntry(mappedEntries, zae);
@@ -451,26 +468,43 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
 
         final String baseName = StringUtils.removeEnd(fileName, ".jar");
-        final String[] parts = StringUtils.splitPreserveAllTokens(baseName, "_");
-        String artifactId;
-        if (parts.length > 2) {
-            artifactId = StringUtils.join(parts, "_", 0, parts.length - 1);
-        } else {
-            artifactId = parts[0];
+        if (baseName.contains(".tests_")) {
+            // We don't care about Eclipse's and Equinox's own tests.
+            return;
         }
-        final String version = parts[parts.length - 1];
         final SdkEntry sdkEntry;
-        if (artifactId.endsWith(".source")) {
-            artifactId = StringUtils.removeEnd(artifactId, ".source");
-            final String aid = artifactId;
-            sdkEntry = mappedEntries.computeIfAbsent(artifactId, k -> new SdkEntry(aid, version));
+        final String version;
+        final String artifactId;
+        if (baseName.contains(".source_")) {
+            // ".source_" splits the base name and the version nicely. Use it.
+            final String[] parts = StringUtils.splitByWholeSeparator(baseName, ".source_", 2);
+            version = parts[1];
+            artifactId = parts[0];
+            sdkEntry = mappedEntries.computeIfAbsent(artifactId, k -> new SdkEntry(artifactId, version));
             sdkEntry.setSourcesEntry(zae);
         } else {
-            final String aid = artifactId;
-            sdkEntry = mappedEntries.computeIfAbsent(artifactId, k -> new SdkEntry(aid, version));
+            // This has to parse these correctly:
+            // Additional underscore in version part: org.w3c.dom.events_3.0.0.draft20060413_v201105210656.jar
+            // Underscore in name part: org.eclipse.swt.win32.win32.x86_64_3.122.0.v20221123-2302.jar
+            // Normal: org.osgi.service.coordinator_1.0.2.201505202024.jar
+            // Normal without dots: assertj-core_3.23.1.jar
+            final String[] parts;
+            if (baseName.contains(".x86_64_")) {
+                // Special case. But it localizes boundary between artifact name and version nicely
+                // because it is always the last thing before the version.
+                parts = StringUtils.splitByWholeSeparator(baseName, ".x86_64_", 2);
+                artifactId = parts[0] + ".x86_64";
+            } else {
+                parts = StringUtils.splitByWholeSeparator(baseName, "_", 2);
+                artifactId = parts[0];
+            }
+            version = parts[1];
+            sdkEntry = mappedEntries.computeIfAbsent(artifactId, k -> new SdkEntry(artifactId, version));
             sdkEntry.setArtifactEntry(zae);
         }
-        sdkEntry.setVersion(version);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Added artifactId {} for entry {}", artifactId, fileName);
+        }
     }
 
     private static final String[] PROP_SOURCES = {"OSGI-INF/l10n/bundle.properties", "fragment.properties", "plugin.properties"};
