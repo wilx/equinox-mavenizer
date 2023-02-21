@@ -1,11 +1,11 @@
 package com.github.wilx.equinox.mavenizer.maven.plugin;
 
-import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
-
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Set;
 import java.util.TreeSet;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 
 class SdkEntry {
     ZipArchiveEntry artifactEntry;
@@ -18,10 +18,14 @@ class SdkEntry {
     /**
      * Artifact ID of the dependency.
      */
-    final Set<String> dependencies = new TreeSet<>();
+    final Set<Dependency> dependencies = new TreeSet<>(
+            Comparator.comparing(Dependency::artifactId)
+                    .thenComparing(Dependency::dependencyType));
     String description;
     String name;
-    final Set<String> importPackage = new TreeSet<>();
+    final Set<ImportPackage> importPackage = new TreeSet<>(
+            Comparator.comparing(ImportPackage::pkg)
+                    .thenComparing(ImportPackage::dependencyType));
     final Set<String> exportPackage = new TreeSet<>();
     String bsn;
     String fragmentHost;
@@ -79,11 +83,18 @@ class SdkEntry {
         this.sourcesPath = sourcesPath;
     }
 
-    public void addDependency(final String dep) {
-        this.dependencies.add(dep);
+    public void addDependency(final String artifactId, DependencyType dependencyType) {
+        if (dependencyType == DependencyType.OPTIONAL) {
+            if (!this.dependencies.contains(new Dependency(artifactId, DependencyType.NORMAL))) {
+                this.dependencies.add(new Dependency(artifactId, dependencyType));
+            }
+        } else {
+            this.dependencies.remove(new Dependency(artifactId, DependencyType.OPTIONAL));
+            this.dependencies.add(new Dependency(artifactId, dependencyType));
+        }
     }
 
-    public Collection<String> getDependencies() {
+    public Collection<Dependency> getDependencies() {
         return this.dependencies;
     }
 
@@ -111,12 +122,12 @@ class SdkEntry {
         this.name = name;
     }
 
-    public Set<String> getImportPackage() {
+    public Set<ImportPackage> getImportPackage() {
         return this.importPackage;
     }
 
-    public void addImportPackage(final String ip) {
-        this.importPackage.add(ip);
+    public void addImportPackage(final String ip, final DependencyType type) {
+        this.importPackage.add(new ImportPackage(ip, type));
     }
 
     public Set<String> getExportPackage() {
@@ -142,4 +153,15 @@ class SdkEntry {
     public void setFragmentHost(final String fragmentHost) {
         this.fragmentHost = fragmentHost;
     }
+
+    public enum DependencyType {
+        NORMAL,
+        OPTIONAL
+    }
+
+    public record Dependency (String artifactId, DependencyType dependencyType)
+    { }
+
+    public record ImportPackage (String pkg, DependencyType dependencyType)
+    { }
 }

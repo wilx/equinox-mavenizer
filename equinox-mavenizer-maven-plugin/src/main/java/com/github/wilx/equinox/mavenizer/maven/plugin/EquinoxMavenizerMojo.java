@@ -1,8 +1,40 @@
 package com.github.wilx.equinox.mavenizer.maven.plugin;
 
+import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.Dependency;
+import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.DependencyType;
+import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.ImportPackage;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.TreeMultimap;
 import com.sun.xml.txw2.output.IndentingXMLStreamWriter;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.apache.commons.io.FilenameUtils;
@@ -32,36 +64,6 @@ import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.xml.stream.XMLOutputFactory;
-import javax.xml.stream.XMLStreamException;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
 
 @SuppressWarnings("unused")
 @Mojo(name = "equinox-mavenizer", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true)
@@ -168,7 +170,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             if (fragmentHost != null) {
                 final SdkEntry hostSdkEntry = bsnMap.get(fragmentHost);
                 if (hostSdkEntry != null) {
-                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId());
+                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId(), DependencyType.NORMAL);
                 }
             }
 
@@ -182,9 +184,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
         // Add dependencies based on exported and imported packages.
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
-            final Set<String> importPackage = sdkEntry.getImportPackage();
-            for (final String pkg : importPackage) {
-                final Set<String> artifactIds = implementedBy.get(pkg);
+            final Set<ImportPackage> importPackages = sdkEntry.getImportPackage();
+            for (final ImportPackage ip : importPackages) {
+                final Set<String> artifactIds = implementedBy.get(ip.pkg());
                 if (artifactIds != null && !artifactIds.isEmpty()) {
                     if (artifactIds.size() > 1) {
                         // There can be split packages which are both imported and exported in multiple bundles.
@@ -193,7 +195,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     }
                     artifactIds.forEach(implementorArtifactId -> {
                         if (!implementorArtifactId.equals(sdkEntry.getArtifactId())) {
-                            sdkEntry.addDependency(implementorArtifactId);
+                            sdkEntry.addDependency(implementorArtifactId, ip.dependencyType());
                         }
                     });
                 }
@@ -330,7 +332,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 xml.writeCharacters("\n");
             }
 
-            final Collection<String> dependencies = sdkEntry.getDependencies();
+            final Collection<Dependency> dependencies = sdkEntry.getDependencies();
             if (dependencies != null && !dependencies.isEmpty()) {
                 xml.writeCharacters("\n");
                 xml.writeComment("These dependencies are best effort generated dependencies.");
@@ -339,7 +341,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
                 xml.writeStartElement("dependencies");
 
-                for (final String depArtifactId : dependencies) {
+                for (final Dependency dep : dependencies) {
+                    final String depArtifactId = dep.artifactId();
                     final SdkEntry depSdkEntry = mappedEntries.get(depArtifactId);
                     if (depSdkEntry == null) {
                         LOGGER.warn("depSdkEntry == null for {}", depArtifactId);
@@ -348,7 +351,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
                     xml.writeStartElement("dependency");
 
-                    xmlWriteGav(xml, this.groupId, depArtifactId, depSdkEntry.getVersion());
+                    xmlWriteGav(xml, this.groupId, depArtifactId, depSdkEntry.getVersion(), dep.dependencyType());
 
                     xml.writeEndElement(); // dependency
                 }
@@ -401,9 +404,18 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private void xmlWriteGav(final IndentingXMLStreamWriter xml, final String depGroupId, final String depArtifactId,
         final String depVersion)
         throws XMLStreamException {
+        xmlWriteGav(xml, depGroupId, depArtifactId, depVersion, DependencyType.NORMAL);
+    }
+
+    private void xmlWriteGav(final IndentingXMLStreamWriter xml, final String depGroupId, final String depArtifactId,
+        final String depVersion, final DependencyType dependencyType)
+        throws XMLStreamException {
         writeTag(xml, depGroupId, "groupId");
         writeTag(xml, depArtifactId, "artifactId");
         writeTag(xml, depVersion, "version");
+        if (dependencyType == DependencyType.OPTIONAL) {
+            writeTag(xml, "true", "optional");
+        }
     }
 
     private void installArtifact(final SdkEntry sdkEntry) throws MojoExecutionException {
@@ -564,21 +576,29 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final ManifestElement[] requireBundleElements = parseManifestHeader(manifestMap, Constants.REQUIRE_BUNDLE);
             if (requireBundleElements != null) {
                 for (final ManifestElement me : requireBundleElements) {
+                    final String resolutionValue = me.getDirective(Constants.RESOLUTION_DIRECTIVE);
                     final String value = me.getValue();
-                    sdkEntry.addDependency(value);
+                    final SdkEntry requiredBundle = bsnMap.get(value);
+                    if (requiredBundle != null) {
+                        sdkEntry.addDependency(requiredBundle.getArtifactId(),
+                                StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL
+                        );
+                    }
                 }
             }
 
             final ManifestElement[] importPackages = parseManifestHeader(manifestMap, Constants.IMPORT_PACKAGE);
             for (final ManifestElement pkg : importPackages) {
-                sdkEntry.addImportPackage(pkg.getValue());
+                final String resolutionValue = pkg.getDirective(Constants.RESOLUTION_DIRECTIVE);
+                sdkEntry.addImportPackage(pkg.getValue(),
+                        StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL);
             }
             final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap,
                 Constants.DYNAMICIMPORT_PACKAGE);
             for (final ManifestElement pkg : dynamicImportPackages) {
                 final String value = pkg.getValue();
                 if (!StringUtils.endsWith(value, "*")) {
-                    sdkEntry.addImportPackage(value);
+                    sdkEntry.addImportPackage(value, DependencyType.OPTIONAL);
                 }
             }
 

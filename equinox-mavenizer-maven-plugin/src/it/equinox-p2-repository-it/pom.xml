@@ -45,7 +45,9 @@
                     <groupId>test.group</groupId>
                     <ignoredBsns>
                         <ignoredBsn>slf4j.nop</ignoredBsn>
+                        <ignoredBsn>slf4j.api</ignoredBsn>
                         <ignoredBsn>org.eclipse.equinox.supplement</ignoredBsn>
+                        <ignoredBsn>org.apache.commons.logging</ignoredBsn>
                         <!-- irnoredBsn>org.eclipse.osgi.services</irnoredBsn -->
                     </ignoredBsns>
                     <equinoxSdkZipFiles>
