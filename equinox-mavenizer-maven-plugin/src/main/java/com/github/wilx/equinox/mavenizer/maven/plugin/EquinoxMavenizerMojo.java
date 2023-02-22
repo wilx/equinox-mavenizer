@@ -749,9 +749,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             if (symbolicNameStr == null) {
                 return false;
             }
-            final ManifestElement[] symbolicNameElements = ManifestElement.parseHeader(Constants.BUNDLE_SYMBOLICNAME,
-                    symbolicNameStr
-            );
+            final ManifestElement[] symbolicNameElements = ManifestElement.parseHeader(Constants.BUNDLE_SYMBOLICNAME, symbolicNameStr);
             final String symbolicName = symbolicNameElements[0].getValue();
             if (this.ignoredBsns.contains(symbolicNameStr)) {
                 return false;
@@ -780,9 +778,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                         StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL
                 );
             }
-            final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap,
-                    Constants.DYNAMICIMPORT_PACKAGE
-            );
+            final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap, Constants.DYNAMICIMPORT_PACKAGE);
             for (final ManifestElement pkg : dynamicImportPackages) {
                 final String value = pkg.getValue();
                 if (!StringUtils.endsWith(value, "*")) {
@@ -809,9 +805,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                         .ifPresent(sdkEntry::setDescription);
             }
 
-            final ManifestElement[] fragmentHostElements = parseManifestHeader(manifestMap,
-                    Constants.FRAGMENT_HOST
-            );
+            final ManifestElement[] fragmentHostElements = parseManifestHeader(manifestMap, Constants.FRAGMENT_HOST);
             if (fragmentHostElements.length != 0) {
                 // Record dependency of the host bundle on this fragment.
                 final ManifestElement me = fragmentHostElements[0];
