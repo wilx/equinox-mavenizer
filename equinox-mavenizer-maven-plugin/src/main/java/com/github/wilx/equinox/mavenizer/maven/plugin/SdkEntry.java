@@ -84,6 +84,10 @@ class SdkEntry {
     }
 
     public void addDependency(final String artifactId, DependencyType dependencyType) {
+        if (artifactId.equals(this.getArtifactId())) {
+            throw new RuntimeException("Self reference in dependencies: " + artifactId);
+        }
+
         if (dependencyType == DependencyType.OPTIONAL) {
             if (!this.dependencies.contains(new Dependency(artifactId, DependencyType.NORMAL))) {
                 this.dependencies.add(new Dependency(artifactId, dependencyType));

@@ -343,7 +343,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             if (fragmentHost != null) {
                 final SdkEntry hostSdkEntry = bsnMap.get(fragmentHost);
                 if (hostSdkEntry != null) {
-                    hostSdkEntry.addDependency(hostSdkEntry.getArtifactId(), DependencyType.NORMAL);
+                    sdkEntry.addDependency(hostSdkEntry.getArtifactId(), DependencyType.NORMAL);
                 }
             }
 
@@ -522,6 +522,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     if (depSdkEntry == null) {
                         LOGGER.warn("depSdkEntry == null for {}", depArtifactId);
                         continue;
+                    }
+                    if (depArtifactId.equals(sdkEntry.getArtifactId())) {
+                        throw new MojoFailureException("Self reference in dependencies: " + sdkEntry);
                     }
 
                     xml.writeStartElement("dependency");
