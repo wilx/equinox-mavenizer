@@ -53,6 +53,9 @@
                     <equinoxSdkZipFiles>
                         <equinoxSdkZipFile>${project.build.directory}/repository-4.26.zip</equinoxSdkZipFile>
                     </equinoxSdkZipFiles>
+                    <deploy>true</deploy>
+                    <deployRepositoryId>local.deploy</deployRepositoryId>
+                    <!-- deployRepositoryUrl>@localRepositoryUrl@/../local.deploy/</deployRepositoryUrl -->
                 </configuration>
                 <executions>
                     <execution>
@@ -60,6 +63,17 @@
                         <goals>
                             <goal>equinox-mavenizer</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>default-deploy</id>
+                        <phase>none</phase>
                     </execution>
                 </executions>
             </plugin>
