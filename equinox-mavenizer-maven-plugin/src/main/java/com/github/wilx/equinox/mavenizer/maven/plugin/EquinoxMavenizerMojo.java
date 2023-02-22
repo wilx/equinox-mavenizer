@@ -40,6 +40,8 @@ import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.maven.RepositoryUtils;
+import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -53,13 +55,17 @@ import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.deployment.DeployRequest;
+import org.eclipse.aether.deployment.DeploymentException;
 import org.eclipse.aether.installation.InstallRequest;
 import org.eclipse.aether.installation.InstallationException;
+import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.util.artifact.SubArtifact;
 import org.eclipse.osgi.framework.util.CaseInsensitiveDictionaryMap;
 import org.eclipse.osgi.internal.framework.EquinoxContainer;
 import org.eclipse.osgi.util.ManifestElement;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.slf4j.Logger;
@@ -69,7 +75,7 @@ import org.slf4j.LoggerFactory;
 @Mojo(name = "equinox-mavenizer", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true)
 public class EquinoxMavenizerMojo extends AbstractMojo {
     private static final DateTimeFormatter BOM_VERSION_FMT = DateTimeFormatter.ofPattern("uuuuMMdd.HHmmss", Locale.US)
-                                                                              .withZone(ZoneId.of("UTC"));
+            .withZone(ZoneId.of("UTC"));
     private static final String XSI_URL = "http://www.w3.org/2001/XMLSchema-instance";
     private static final Logger LOGGER = LoggerFactory.getLogger(EquinoxMavenizerMojo.class);
     public static final ManifestElement[] EMPTY_MANIFEST_ELEMENTS = new ManifestElement[0];
@@ -86,6 +92,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.build.directory}")
     private File buildDir;
 
+    @Parameter(defaultValue = "${settings.offline}", readonly = true)
+    private boolean offline;
+
     @Parameter(property = "equinox-mavenizer.groupId", required = true)
     private String groupId;
 
@@ -94,6 +103,18 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     @Parameter
     private Set<String> ignoredBsns;
+
+    @Parameter(property = "equinox-mavenizer.deploy", defaultValue = "false")
+    private boolean deploy;
+
+    @Parameter(property = "equinox-mavenizer.deployRepositoryId", defaultValue = "")
+    private String deployRepositoryId;
+
+    @Parameter(property = "equinox-mavenizer.deployRepositoryUrl", defaultValue = "")
+    private String deployRepositoryUrl;
+
+    @Parameter(property = "equinox-mavenizer.retryFailedDeploymentCount", defaultValue = "10")
+    private int retryFailedDeploymentCount;
 
     private Path sdkArtifactsDirPath;
     private int artifactCounter = 0;
@@ -123,10 +144,159 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
         // Generate BOM POM.
         generateBom(mappedEntries.values());
-        installBom();
 
         // Install extracted JARs and generated POM files together.
         installArtifacts(mappedEntries);
+        installBom();
+
+        if (this.deploy) {
+            deployArtifacts(mappedEntries);
+        }
+    }
+
+    private void deployArtifacts(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException, MojoFailureException {
+        if (this.offline) {
+            throw new MojoFailureException("Cannot deploy artifacts when Maven is in offline mode");
+        }
+        if (StringUtils.isBlank(this.deployRepositoryId)) {
+            throw new MojoFailureException("deployRepositoryId must be specified");
+        }
+
+        final RemoteRepository remoteRepository = selectRemoteRepository();
+
+        Exception deployFailure = null;
+        for (SdkEntry sdkEntry : mappedEntries.values()) {
+            final DeployRequest deployRequest = new DeployRequest();
+            deployRequest.setRepository(remoteRepository);
+            final Artifact mainArtifact = createMainArtifact(sdkEntry);
+            deployRequest.addArtifact(mainArtifact);
+
+            final Path sourcesPath = sdkEntry.getSourcesPath();
+            if (sourcesPath != null) {
+                final SubArtifact sourcesArtifact = createSourceSubartifact(mainArtifact, sourcesPath);
+                deployRequest.addArtifact(sourcesArtifact);
+            }
+
+            final Path pomPath = sdkEntry.getPomFile();
+            if (pomPath != null) {
+                final SubArtifact pomArtifact = createPomSubartifact(mainArtifact, pomPath);
+                deployRequest.addArtifact(pomArtifact);
+            }
+
+            try {
+                deployOne(deployRequest);
+            } catch (DeploymentException e) {
+                if (deployFailure == null) {
+                    deployFailure = e;
+                }
+                LOGGER.error("Failed to deploy: {}", e.getLocalizedMessage());
+                LOGGER.error("Failed request: {}", deployRequest);
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("Exception", e);
+                }
+                LOGGER.info("Continuing with the rest of the deployment requests");
+            }
+        }
+
+        {
+            final DeployRequest deployRequest = new DeployRequest();
+            deployRequest.setRepository(remoteRepository);
+            final Artifact bomArtifact = createBomArtifact();
+            deployRequest.addArtifact(bomArtifact);
+            try {
+                deployOne(deployRequest);
+            } catch (DeploymentException e) {
+                if (deployFailure == null) {
+                    deployFailure = e;
+                }
+                LOGGER.error("Failed to deploy: {}", e.getLocalizedMessage());
+                LOGGER.error("Failed request: {}", deployRequest);
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("Exception", e);
+                }
+                LOGGER.info("Continuing with the rest of the deployment requests");
+            }
+        }
+
+        if (deployFailure != null) {
+            LOGGER.error("First deployment failure was: {}", deployFailure.getLocalizedMessage());
+            throw new MojoExecutionException("First deployment failure", deployFailure);
+        }
+    }
+
+    @Nullable
+    private RemoteRepository selectRemoteRepository() throws MojoFailureException {
+        final RemoteRepository remoteRepository;
+        if (StringUtils.isNotBlank(this.deployRepositoryUrl)) {
+            remoteRepository = getRemoteRepository(this.deployRepositoryId, this.deployRepositoryUrl);
+        } else {
+            final List<ArtifactRepository> remoteRepositories = this.session.getRequest().getRemoteRepositories();
+            LOGGER.debug("Remote repositories:\n{}", remoteRepositories);
+            final Optional<ArtifactRepository> repoOpt = remoteRepositories.stream().filter(ar -> this.deployRepositoryId.equals(ar.getId())).findFirst();
+            remoteRepository = RepositoryUtils.toRepo(repoOpt.orElseThrow(
+                    () -> new MojoFailureException("deployRepositoryUrl was not specified but repository with ID " + this.deployRepositoryId + " was not found")));
+        }
+        return remoteRepository;
+    }
+
+    @NotNull
+    private static SubArtifact createPomSubartifact(final Artifact mainArtifact, final Path pomPath) {
+        return new SubArtifact(mainArtifact, "", "pom", pomPath.toFile());
+    }
+
+    @NotNull
+    private static SubArtifact createSourceSubartifact(final Artifact mainArtifact, final Path sourcesPath) {
+        return new SubArtifact(mainArtifact, "source", "jar", sourcesPath.toFile());
+    }
+
+    private RemoteRepository getRemoteRepository(final String repositoryId, final String url) {
+        RemoteRepository result = new RemoteRepository.Builder(repositoryId, "default", url).build();
+
+        if (result.getAuthentication() == null || result.getProxy() == null) {
+            RemoteRepository.Builder builder = new RemoteRepository.Builder(result);
+
+            if (result.getAuthentication() == null) {
+                builder.setAuthentication(session.getRepositorySession()
+                        .getAuthenticationSelector()
+                        .getAuthentication(result));
+            }
+
+            if (result.getProxy() == null) {
+                builder.setProxy(
+                        session.getRepositorySession().getProxySelector().getProxy(result));
+            }
+
+            result = builder.build();
+        }
+
+        return result;
+    }
+
+    private void deployOne(final DeployRequest deployRequest) throws DeploymentException {
+        int retryFailedDeploymentCounter = Math.max(1, Math.min(10, this.retryFailedDeploymentCount));
+        DeploymentException exception = null;
+        for (int count = 0; count < retryFailedDeploymentCounter; count++) {
+            try {
+                if (count > 0) {
+                    LOGGER.info("Retrying deployment attempt {} of {}", count + 1, retryFailedDeploymentCounter);
+                }
+
+                repositorySystem.deploy(session.getRepositorySession(), deployRequest);
+                exception = null;
+                break;
+            } catch (DeploymentException e) {
+                if (count + 1 < retryFailedDeploymentCounter) {
+                    LOGGER.warn("Encountered issue during deployment: {}", e.getLocalizedMessage());
+                    LOGGER.debug("Exception", e);
+                }
+                if (exception == null) {
+                    exception = e;
+                }
+            }
+        }
+        if (exception != null) {
+            throw exception;
+        }
     }
 
     private void installArtifacts(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException {
@@ -137,8 +307,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     private void installBom() throws MojoExecutionException {
         if (this.bomPath != null) {
-            final Artifact bomArtifact = new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion)
-                .setFile(this.bomPath.toFile());
+            final Artifact bomArtifact = createBomArtifact();
             try {
                 final RepositorySystemSession repositorySystemSession = this.session.getRepositorySession();
                 final InstallRequest installRequest = new InstallRequest();
@@ -150,8 +319,12 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
+    private Artifact createBomArtifact() {
+        return new DefaultArtifact(this.groupId, "bom", "pom", this.bomVersion).setFile(this.bomPath.toFile());
+    }
+
     private void generatePomFiles(
-        final Map<String, SdkEntry> mappedEntries) throws MojoFailureException, MojoExecutionException {
+            final Map<String, SdkEntry> mappedEntries) throws MojoFailureException, MojoExecutionException {
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             try {
                 generatePomFile(mappedEntries, sdkEntry);
@@ -162,8 +335,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private static void analyzeDependencies(final Map<String, SdkEntry> mappedEntries,
-        final Map<String, SdkEntry> bsnMap,
-        final SetMultimap<String, String> implementedBy) {
+            final Map<String, SdkEntry> bsnMap,
+            final SetMultimap<String, String> implementedBy) {
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             // Add dependency based on fragment host.
             final String fragmentHost = sdkEntry.getFragmentHost();
@@ -204,7 +377,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private void analyzeMetadata(final Map<String, SdkEntry> mappedEntries,
-        final Map<String, SdkEntry> bsnMap) throws MojoExecutionException, MojoFailureException {
+            final Map<String, SdkEntry> bsnMap) throws MojoExecutionException, MojoFailureException {
         final Collection<String> toRemoveArtifactId = new HashSet<>(10);
         for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
             final SdkEntry sdkEntry = entry.getValue();
@@ -238,7 +411,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     // Add code JAR.
                     String numStr = String.format("%04d", this.artifactCounter++);
                     final Path artifactPath = this.sdkArtifactsDirPath.resolve(
-                        numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + ".jar");
+                            numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + ".jar");
                     sdkEntry.setArtifactPath(artifactPath);
                     copyEntryIntoFile(sdkZipFile, artifactEntry, artifactPath);
 
@@ -247,7 +420,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     if (sourceEntry != null) {
                         numStr = String.format("%04d", this.artifactCounter++);
                         final Path sourcesPath = this.sdkArtifactsDirPath.resolve(
-                            numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + "-sources.jar");
+                                numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + "-sources.jar");
                         sdkEntry.setSourcesPath(sourcesPath);
                         copyEntryIntoFile(sdkZipFile, sourceEntry, sourcesPath);
                     }
@@ -263,7 +436,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         this.bomPath = this.sdkArtifactsDirPath.resolve(numStr + "-bom.pom");
 
         try (final BufferedWriter writer = Files.newBufferedWriter(this.bomPath, StandardCharsets.UTF_8,
-            StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+        )) {
             final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
 
             xmlWritePomPreamble(xml);
@@ -298,15 +472,16 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private void generatePomFile(final Map<String, SdkEntry> mappedEntries,
-        final SdkEntry sdkEntry) throws IOException, MojoFailureException {
+            final SdkEntry sdkEntry) throws IOException, MojoFailureException {
         final String artifactId = sdkEntry.getArtifactId();
         final String numStr = String.format("%04d", this.artifactCounter++);
         final Path pomPath = this.sdkArtifactsDirPath.resolve(
-            numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + ".pom");
+                numStr + "-" + artifactId + "-" + sdkEntry.getVersion() + ".pom");
         sdkEntry.setPomFile(pomPath);
         try (final BufferedWriter writer = Files.newBufferedWriter(pomPath, StandardCharsets.UTF_8,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                StandardOpenOption.WRITE,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+        )) {
             final IndentingXMLStreamWriter xml = newIndentingXMLStreamWriter(writer);
 
             xmlWritePomPreamble(xml);
@@ -377,7 +552,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
         xml.writeStartElement("project");
         xml.writeAttribute(XSI_URL, "schemaLocation",
-            "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd");
+                "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+        );
 
         xml.writeStartElement(mavenUri, "modelVersion");
         xml.writeCharacters("4.0.0");
@@ -388,28 +564,28 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     @NotNull
     private static IndentingXMLStreamWriter newIndentingXMLStreamWriter(
-        @NotNull final BufferedWriter writer) throws XMLStreamException {
+            @NotNull final BufferedWriter writer) throws XMLStreamException {
         final XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newFactory();
         xmlOutputFactory.setProperty(XMLOutputFactory.IS_REPAIRING_NAMESPACES, true);
         return new IndentingXMLStreamWriter(xmlOutputFactory.createXMLStreamWriter(writer));
     }
 
     private static void writeTag(final IndentingXMLStreamWriter xml, final String text,
-        final String tag) throws XMLStreamException {
+            final String tag) throws XMLStreamException {
         xml.writeStartElement(tag);
         xml.writeCharacters(text);
         xml.writeEndElement(); // tag
     }
 
     private void xmlWriteGav(final IndentingXMLStreamWriter xml, final String depGroupId, final String depArtifactId,
-        final String depVersion)
-        throws XMLStreamException {
+            final String depVersion)
+            throws XMLStreamException {
         xmlWriteGav(xml, depGroupId, depArtifactId, depVersion, DependencyType.NORMAL);
     }
 
     private void xmlWriteGav(final IndentingXMLStreamWriter xml, final String depGroupId, final String depArtifactId,
-        final String depVersion, final DependencyType dependencyType)
-        throws XMLStreamException {
+            final String depVersion, final DependencyType dependencyType)
+            throws XMLStreamException {
         writeTag(xml, depGroupId, "groupId");
         writeTag(xml, depArtifactId, "artifactId");
         writeTag(xml, depVersion, "version");
@@ -422,20 +598,18 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         final RepositorySystemSession repositorySystemSession = this.session.getRepositorySession();
         final InstallRequest installRequest = new InstallRequest();
 
-        final Artifact mainArtifact = new DefaultArtifact(this.groupId, sdkEntry.getArtifactId(), "jar",
-            sdkEntry.getVersion()).setFile(sdkEntry.getArtifactPath().toFile());
+        final Artifact mainArtifact = createMainArtifact(sdkEntry);
         installRequest.addArtifact(mainArtifact);
 
         final Path sourcesPath = sdkEntry.getSourcesPath();
         if (sourcesPath != null) {
-            final SubArtifact sourcesArtifact = new SubArtifact(mainArtifact, "source", "jar",
-                sourcesPath.toFile());
+            final SubArtifact sourcesArtifact = createSourceSubartifact(mainArtifact, sourcesPath);
             installRequest.addArtifact(sourcesArtifact);
         }
 
         final Path pomPath = sdkEntry.getPomFile();
         if (pomPath != null) {
-            final SubArtifact pomArtifact = new SubArtifact(mainArtifact, "", "pom", pomPath.toFile());
+            final SubArtifact pomArtifact = createPomSubartifact(mainArtifact, pomPath);
             installRequest.addArtifact(pomArtifact);
         }
 
@@ -446,23 +620,30 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
+    private Artifact createMainArtifact(final SdkEntry sdkEntry) {
+        return new DefaultArtifact(this.groupId, sdkEntry.getArtifactId(), "jar",
+                sdkEntry.getVersion()
+        ).setFile(sdkEntry.getArtifactPath().toFile());
+    }
+
     private static void copyEntryIntoFile(final ZipFile sdkZipFile, final ZipArchiveEntry artifactEntry,
-        final Path artifactPath) throws IOException {
+            final Path artifactPath) throws IOException {
         LOGGER.info("Extracting {} as {}", artifactEntry.getName(), artifactPath);
         try (final InputStream zipEntryInputStream = sdkZipFile.getInputStream(artifactEntry);
              final InputStream inputStream = IOUtils.toBufferedInputStream(zipEntryInputStream, 0x10000);
              final OutputStream outputFileStream = Files.newOutputStream(artifactPath, StandardOpenOption.WRITE,
-                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+             )) {
             IOUtils.copyLarge(inputStream, outputFileStream, new byte[0x10000]);
         }
     }
 
     private Map<String, SdkEntry> analyzeSdkArchive(final Map<String, SdkEntry> mappedEntries,
-        @NotNull final Enumeration<ZipArchiveEntry> entries) {
+            @NotNull final Enumeration<ZipArchiveEntry> entries) {
         final boolean debugEnabled = LOGGER.isDebugEnabled();
         entries.asIterator().forEachRemaining(zae -> {
             if (zae.isDirectory() || zae.isUnixSymlink() || !zae.isStreamContiguous()
-                || !zae.getName().startsWith("plugins/")) {
+                    || !zae.getName().startsWith("plugins/")) {
                 if (debugEnabled) {
                     LOGGER.debug("Skipping archive entry {}", zae.getName());
                 }
@@ -547,7 +728,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private boolean analyzeEntryMetadata(final Map<String, SdkEntry> bsnMap,
-        final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
+            final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
         final Path artifactPath = sdkEntry.getArtifactPath();
         try (final JarFile jarFile = new JarFile(artifactPath.toFile())) {
             final JarEntry manifestJarEntry = jarFile.getJarEntry(JarFile.MANIFEST_NAME);
@@ -558,14 +739,16 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final Map<String, String> manifestMap;
             try (final InputStream manifestInputStream = jarFile.getInputStream(manifestJarEntry)) {
                 manifestMap = ManifestElement.parseBundleManifest(manifestInputStream,
-                    new CaseInsensitiveDictionaryMap<>(10));
+                        new CaseInsensitiveDictionaryMap<>(10)
+                );
             }
             final String symbolicNameStr = manifestMap.get(Constants.BUNDLE_SYMBOLICNAME);
             if (symbolicNameStr == null) {
                 return false;
             }
             final ManifestElement[] symbolicNameElements = ManifestElement.parseHeader(Constants.BUNDLE_SYMBOLICNAME,
-                symbolicNameStr);
+                    symbolicNameStr
+            );
             final String symbolicName = symbolicNameElements[0].getValue();
             if (this.ignoredBsns.contains(symbolicNameStr)) {
                 return false;
@@ -591,10 +774,12 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             for (final ManifestElement pkg : importPackages) {
                 final String resolutionValue = pkg.getDirective(Constants.RESOLUTION_DIRECTIVE);
                 sdkEntry.addImportPackage(pkg.getValue(),
-                        StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL);
+                        StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL
+                );
             }
             final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap,
-                Constants.DYNAMICIMPORT_PACKAGE);
+                    Constants.DYNAMICIMPORT_PACKAGE
+            );
             for (final ManifestElement pkg : dynamicImportPackages) {
                 final String value = pkg.getValue();
                 if (!StringUtils.endsWith(value, "*")) {
@@ -612,17 +797,18 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final String manifestBundleName = manifestMap.getOrDefault(Constants.BUNDLE_NAME, "").trim();
             if (StringUtils.isNotBlank(manifestBundleName)) {
                 resolvePlaceholder(properties, manifestBundleName)
-                    .ifPresent(sdkEntry::setName);
+                        .ifPresent(sdkEntry::setName);
             }
 
             final String manifestBundleDesc = manifestMap.getOrDefault(Constants.BUNDLE_DESCRIPTION, "").trim();
             if (StringUtils.isNotBlank(manifestBundleDesc)) {
                 resolvePlaceholder(properties, manifestBundleDesc)
-                    .ifPresent(sdkEntry::setDescription);
+                        .ifPresent(sdkEntry::setDescription);
             }
 
             final ManifestElement[] fragmentHostElements = parseManifestHeader(manifestMap,
-                Constants.FRAGMENT_HOST);
+                    Constants.FRAGMENT_HOST
+            );
             if (fragmentHostElements.length != 0) {
                 // Record dependency of the host bundle on this fragment.
                 final ManifestElement me = fragmentHostElements[0];
@@ -640,7 +826,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private static ManifestElement[] parseManifestHeader(@NotNull final Map<String, String> manifestMap,
-        @NotNull final String header) throws BundleException {
+            @NotNull final String header) throws BundleException {
         final String value = manifestMap.get(header);
         if (value != null) {
             return ManifestElement.parseHeader(header, value);
