@@ -48,6 +48,11 @@
                         <ignoredBsn>slf4j.api</ignoredBsn>
                         <ignoredBsn>org.eclipse.equinox.supplement</ignoredBsn>
                         <ignoredBsn>org.apache.commons.logging</ignoredBsn>
+                        <ignoredBsn>org.apache.commons.commons-io</ignoredBsn>
+                        <ignoredBsn>org.apache.commons.commons-fileupload</ignoredBsn>
+                        <ignoredBsn>jakarta.servlet-api</ignoredBsn>
+                        <ignoredBsn>javax.servlet.jsp-api</ignoredBsn>
+                        <ignoredBsn>javax.el</ignoredBsn>
                         <!-- irnoredBsn>org.eclipse.osgi.services</irnoredBsn -->
                     </ignoredBsns>
                     <equinoxSdkZipFiles>
