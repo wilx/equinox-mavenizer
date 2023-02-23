@@ -14,6 +14,15 @@
                 <groupId>com.googlecode.maven-download-plugin</groupId>
                 <artifactId>download-maven-plugin</artifactId>
                 <version>1.6.8</version>
+                <configuration>
+                    <followRedirects>true</followRedirects>
+                    <overwrite>true</overwrite>
+                    <!-- skipCache>true</skipCache -->
+                    <headers>
+                        <User-Agent>Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15</User-Agent>
+                        <Referer>https://www.eclipse.org/</Referer>
+                    </headers>
+                </configuration>
                 <executions>
                     <execution>
                         <id>fetch-equinox</id>
@@ -25,14 +34,20 @@
                             <url>https://mirror.dogado.de/eclipse/eclipse/downloads/drops4/R-4.26-202211231800/repository-4.26.zip</url>
                             <unpack>false</unpack>
                             <outputDirectory>${project.build.directory}</outputDirectory>
-                            <outputFileName>repository-4.26.zip</outputFileName>
-                            <followRedirects>true</followRedirects>
-                            <overwrite>true</overwrite>
-                            <!-- skipCache>true</skipCache -->
-                            <headers>
-                                <User-Agent>Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15</User-Agent>
-                                <Referer>https://www.eclipse.org/</Referer>
-                            </headers>
+                            <outputFileName>repository.zip</outputFileName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>fetch-ajdt</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://download.eclipse.org/tools/ajdt/423/dev/update/ajdt-e423-2.2.4.202302111621.zip</url>
+                            <unpack>false</unpack>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <outputFileName>ajdt.zip</outputFileName>
                         </configuration>
                     </execution>
                 </executions>
@@ -56,7 +71,8 @@
                         <!-- irnoredBsn>org.eclipse.osgi.services</irnoredBsn -->
                     </ignoredBsns>
                     <equinoxSdkZipFiles>
-                        <equinoxSdkZipFile>${project.build.directory}/repository-4.26.zip</equinoxSdkZipFile>
+                        <equinoxSdkZipFile>${project.build.directory}/repository.zip</equinoxSdkZipFile>
+                        <equinoxSdkZipFile>${project.build.directory}/ajdt.zip</equinoxSdkZipFile>
                     </equinoxSdkZipFiles>
                     <deploy>true</deploy>
                     <deployRepositoryId>local.deploy</deployRepositoryId>

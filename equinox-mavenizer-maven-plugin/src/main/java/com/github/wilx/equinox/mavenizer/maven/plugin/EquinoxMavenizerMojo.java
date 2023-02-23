@@ -395,11 +395,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         for (final File equinoxSdkZipFile : this.equinoxSdkZipFiles) {
             try (final ZipFile sdkZipFile = new ZipFile(equinoxSdkZipFile)) {
                 final Enumeration<ZipArchiveEntry> entriesInPhysicalOrder = sdkZipFile.getEntriesInPhysicalOrder();
-                analyzeSdkArchive(mappedEntries, entriesInPhysicalOrder);
+                final Map<String, SdkEntry> thisArchiveMap = analyzeSdkArchive(entriesInPhysicalOrder);
 
                 // Copy files out of the SDK archive.
                 Files.createDirectories(this.sdkArtifactsDirPath);
-                for (final Map.Entry<String, SdkEntry> entry : mappedEntries.entrySet()) {
+                for (final Map.Entry<String, SdkEntry> entry : thisArchiveMap.entrySet()) {
                     final String artifactId = entry.getKey();
                     final SdkEntry sdkEntry = entry.getValue();
                     final ZipArchiveEntry artifactEntry = sdkEntry.getArtifactEntry();
@@ -425,6 +425,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                         copyEntryIntoFile(sdkZipFile, sourceEntry, sourcesPath);
                     }
                 }
+
+                // Merge this archive's entries into cumulative map.
+                thisArchiveMap.forEach(mappedEntries::putIfAbsent);
             } catch (final IOException e) {
                 throw new MojoExecutionException(e.getMessage(), e);
             }
@@ -641,9 +644,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
     }
 
-    private Map<String, SdkEntry> analyzeSdkArchive(final Map<String, SdkEntry> mappedEntries,
-            @NotNull final Enumeration<ZipArchiveEntry> entries) {
+    /**
+     *
+     * @param entries archive entries enumeration
+     * @return SdkEntry map for this ZIP file only.
+     */
+    private Map<String, SdkEntry> analyzeSdkArchive(@NotNull final Enumeration<ZipArchiveEntry> entries) {
         final boolean debugEnabled = LOGGER.isDebugEnabled();
+        final Map<String, SdkEntry> thisArchiveMap = new TreeMap<>();
         entries.asIterator().forEachRemaining(zae -> {
             if (zae.isDirectory() || zae.isUnixSymlink() || !zae.isStreamContiguous()
                     || !zae.getName().startsWith("plugins/")) {
@@ -652,21 +660,21 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 }
                 return;
             }
-            analyzeOneEntry(mappedEntries, zae);
+            analyzeOneEntry(thisArchiveMap, zae);
         });
-        return mappedEntries;
+        return thisArchiveMap;
     }
 
-    private static void analyzeOneEntry(final Map<String, SdkEntry> mappedEntries, final ZipArchiveEntry zae) {
+    private static Optional<SdkEntry> analyzeOneEntry(final Map<String, SdkEntry> mappedEntries, final ZipArchiveEntry zae) {
         final String fileName = FilenameUtils.getName(zae.getName());
         if (!fileName.endsWith(".jar") || !fileName.contains("_")) {
-            return;
+            return Optional.empty();
         }
 
         final String baseName = StringUtils.removeEnd(fileName, ".jar");
         if (baseName.contains(".tests_")) {
             // We don't care about Eclipse's and Equinox's own tests.
-            return;
+            return Optional.empty();
         }
         final SdkEntry sdkEntry;
         final String version;
@@ -701,6 +709,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Added artifactId {} for entry {}", artifactId, fileName);
         }
+        return Optional.of(sdkEntry);
     }
 
     private static final String[] PROP_SOURCES = {"OSGI-INF/l10n/bundle.properties", "fragment.properties", "plugin.properties"};
