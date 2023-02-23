@@ -3,6 +3,7 @@ package com.github.wilx.equinox.mavenizer.maven.plugin;
 import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.Dependency;
 import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.DependencyType;
 import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.ImportPackage;
+import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.RequireBundle;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.TreeMultimap;
 import com.sun.xml.txw2.output.IndentingXMLStreamWriter;
@@ -345,6 +346,17 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 if (hostSdkEntry != null) {
                     sdkEntry.addDependency(hostSdkEntry.getArtifactId(), DependencyType.NORMAL);
                 }
+            }
+
+            final Set<RequireBundle> requireBundles = sdkEntry.getRequireBundle();
+            for (RequireBundle rb : requireBundles) {
+                final String requiredBundleName = rb.bundle();
+                final SdkEntry requiredBundleSdkEntry = bsnMap.get(requiredBundleName);
+                if (requiredBundleSdkEntry == null) {
+                    LOGGER.warn("Missing required bundle {} for artifact {}", requiredBundleName, sdkEntry.getArtifactId());
+                    continue;
+                }
+                sdkEntry.addDependency(requiredBundleSdkEntry.getArtifactId(), rb.dependencyType());
             }
 
             // Map exports to providing artifactId.
@@ -764,28 +776,25 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 return false;
             }
             sdkEntry.setBsn(symbolicName);
+            if (bsnMap.containsKey(symbolicName)) {
+                LOGGER.warn("Duplicate BSN: {}", symbolicName);
+                LOGGER.warn("Existing artifact: {}", bsnMap.get(symbolicName).getArtifactPath());
+                LOGGER.warn("This instance: {}", artifactPath);
+                return false;
+            }
             bsnMap.put(symbolicName, sdkEntry);
 
             final ManifestElement[] requireBundleElements = parseManifestHeader(manifestMap, Constants.REQUIRE_BUNDLE);
-            if (requireBundleElements != null) {
-                for (final ManifestElement me : requireBundleElements) {
-                    final String resolutionValue = me.getDirective(Constants.RESOLUTION_DIRECTIVE);
-                    final String value = me.getValue();
-                    final SdkEntry requiredBundle = bsnMap.get(value);
-                    if (requiredBundle != null) {
-                        sdkEntry.addDependency(requiredBundle.getArtifactId(),
-                                StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL
-                        );
-                    }
-                }
+            for (final ManifestElement me : requireBundleElements) {
+                final String requiredBundleBsn = me.getValue();
+                final String resolutionValue = me.getDirective(Constants.RESOLUTION_DIRECTIVE);
+                sdkEntry.addRequireBundle(requiredBundleBsn, resolutionToDepType(resolutionValue));
             }
 
             final ManifestElement[] importPackages = parseManifestHeader(manifestMap, Constants.IMPORT_PACKAGE);
             for (final ManifestElement pkg : importPackages) {
                 final String resolutionValue = pkg.getDirective(Constants.RESOLUTION_DIRECTIVE);
-                sdkEntry.addImportPackage(pkg.getValue(),
-                        StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL
-                );
+                sdkEntry.addImportPackage(pkg.getValue(), resolutionToDepType(resolutionValue));
             }
             final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap, Constants.DYNAMICIMPORT_PACKAGE);
             for (final ManifestElement pkg : dynamicImportPackages) {
@@ -829,6 +838,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
 
         return true;
+    }
+
+    @NotNull
+    private static DependencyType resolutionToDepType(final String resolutionValue) {
+        return StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL;
     }
 
     private static ManifestElement[] parseManifestHeader(@NotNull final Map<String, String> manifestMap,

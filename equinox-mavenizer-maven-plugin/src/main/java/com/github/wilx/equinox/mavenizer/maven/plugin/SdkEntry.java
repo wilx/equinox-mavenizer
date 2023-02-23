@@ -26,6 +26,9 @@ class SdkEntry {
     final Set<ImportPackage> importPackage = new TreeSet<>(
             Comparator.comparing(ImportPackage::pkg)
                     .thenComparing(ImportPackage::dependencyType));
+    final Set<RequireBundle> requireBundle = new TreeSet<>(
+            Comparator.comparing(RequireBundle::bundle)
+                    .thenComparing(RequireBundle::dependencyType));
     final Set<String> exportPackage = new TreeSet<>();
     String bsn;
     String fragmentHost;
@@ -134,6 +137,14 @@ class SdkEntry {
         this.importPackage.add(new ImportPackage(ip, type));
     }
 
+    public Set<RequireBundle> getRequireBundle() {
+        return this.requireBundle;
+    }
+
+    public void addRequireBundle(final String bundle, final DependencyType type) {
+        this.requireBundle.add(new RequireBundle(bundle, type));
+    }
+
     public Set<String> getExportPackage() {
         return this.exportPackage;
     }
@@ -167,5 +178,8 @@ class SdkEntry {
     { }
 
     public record ImportPackage (String pkg, DependencyType dependencyType)
+    { }
+
+    public record RequireBundle (String bundle, DependencyType dependencyType)
     { }
 }
