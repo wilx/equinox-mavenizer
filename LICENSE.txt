@@ -1,4 +1,4 @@
-Copyright (c) 2022 - 2023, Václav Haisman
+Copyright (c) 2022 - 2024, Václav Haisman
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
