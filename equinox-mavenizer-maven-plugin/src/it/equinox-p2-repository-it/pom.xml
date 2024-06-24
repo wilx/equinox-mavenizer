@@ -13,7 +13,7 @@
             <plugin>
                 <groupId>com.googlecode.maven-download-plugin</groupId>
                 <artifactId>download-maven-plugin</artifactId>
-                <version>1.6.8</version>
+                <version>1.9.0</version>
                 <configuration>
                     <followRedirects>true</followRedirects>
                     <overwrite>true</overwrite>
@@ -31,7 +31,7 @@
                             <goal>wget</goal>
                         </goals>
                         <configuration>
-                            <url>https://mirror.dogado.de/eclipse/eclipse/downloads/drops4/R-4.26-202211231800/repository-4.26.zip</url>
+                            <url>https://mirror.dkm.cz/eclipse/eclipse/downloads/drops4/R-4.32-202406010610/repository-4.32.zip</url>
                             <unpack>false</unpack>
                             <outputDirectory>${project.build.directory}</outputDirectory>
                             <outputFileName>repository.zip</outputFileName>
@@ -44,7 +44,7 @@
                             <goal>wget</goal>
                         </goals>
                         <configuration>
-                            <url>https://download.eclipse.org/tools/ajdt/423/dev/update/ajdt-e423-2.2.4.202302111621.zip</url>
+                            <url>https://download.eclipse.org/tools/aspectj/ajdt/431/dev/update/ajdt-e431-2.2.4.202405141514.zip</url>
                             <unpack>false</unpack>
                             <outputDirectory>${project.build.directory}</outputDirectory>
                             <outputFileName>ajdt.zip</outputFileName>

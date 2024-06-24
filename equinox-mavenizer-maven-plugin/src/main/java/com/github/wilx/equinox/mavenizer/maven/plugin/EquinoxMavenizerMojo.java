@@ -405,7 +405,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     private void extractSdkJars(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException {
         for (final File equinoxSdkZipFile : this.equinoxSdkZipFiles) {
-            try (final ZipFile sdkZipFile = new ZipFile(equinoxSdkZipFile)) {
+            try (final ZipFile sdkZipFile = ZipFile.builder().setFile(equinoxSdkZipFile).get()) {
                 final Enumeration<ZipArchiveEntry> entriesInPhysicalOrder = sdkZipFile.getEntriesInPhysicalOrder();
                 final Map<String, SdkEntry> thisArchiveMap = analyzeSdkArchive(entriesInPhysicalOrder);
 
@@ -684,7 +684,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         }
 
         final String baseName = StringUtils.removeEnd(fileName, ".jar");
-        if (baseName.contains(".tests_")) {
+        if (baseName.contains(".tests_")
+            || baseName.contains(".tests.source_")) {
             // We don't care about Eclipse's and Equinox's own tests.
             return Optional.empty();
         }
@@ -754,6 +755,9 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private boolean analyzeEntryMetadata(final Map<String, SdkEntry> bsnMap,
             final SdkEntry sdkEntry) throws MojoExecutionException, MojoFailureException {
         final Path artifactPath = sdkEntry.getArtifactPath();
+        if (artifactPath == null) {
+            return false;
+        }
         try (final JarFile jarFile = new JarFile(artifactPath.toFile())) {
             final JarEntry manifestJarEntry = jarFile.getJarEntry(JarFile.MANIFEST_NAME);
             if (manifestJarEntry == null) {
