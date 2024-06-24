@@ -86,7 +86,7 @@ class SdkEntry {
         this.sourcesPath = sourcesPath;
     }
 
-    public void addDependency(final String artifactId, DependencyType dependencyType) {
+    public void addDependency(final String artifactId, final DependencyType dependencyType) {
         if (artifactId.equals(this.getArtifactId())) {
             throw new RuntimeException("Self reference in dependencies: " + artifactId);
         }

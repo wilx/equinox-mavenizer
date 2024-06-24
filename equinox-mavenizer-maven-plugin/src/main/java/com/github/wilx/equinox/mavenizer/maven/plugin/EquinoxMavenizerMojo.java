@@ -166,7 +166,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         final RemoteRepository remoteRepository = selectRemoteRepository();
 
         Exception deployFailure = null;
-        for (SdkEntry sdkEntry : mappedEntries.values()) {
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
             final DeployRequest deployRequest = new DeployRequest();
             deployRequest.setRepository(remoteRepository);
             final Artifact mainArtifact = createMainArtifact(sdkEntry);
@@ -186,16 +186,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
             try {
                 deployOne(deployRequest);
-            } catch (DeploymentException e) {
+            } catch (final DeploymentException e) {
                 if (deployFailure == null) {
                     deployFailure = e;
                 }
-                LOGGER.error("Failed to deploy: {}", e.getLocalizedMessage());
-                LOGGER.error("Failed request: {}", deployRequest);
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("Exception", e);
-                }
-                LOGGER.info("Continuing with the rest of the deployment requests");
+                signalFailure(e, deployRequest);
             }
         }
 
@@ -206,16 +201,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             deployRequest.addArtifact(bomArtifact);
             try {
                 deployOne(deployRequest);
-            } catch (DeploymentException e) {
+            } catch (final DeploymentException e) {
                 if (deployFailure == null) {
                     deployFailure = e;
                 }
-                LOGGER.error("Failed to deploy: {}", e.getLocalizedMessage());
-                LOGGER.error("Failed request: {}", deployRequest);
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("Exception", e);
-                }
-                LOGGER.info("Continuing with the rest of the deployment requests");
+                signalFailure(e, deployRequest);
             }
         }
 
@@ -223,6 +213,15 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             LOGGER.error("First deployment failure was: {}", deployFailure.getLocalizedMessage());
             throw new MojoExecutionException("First deployment failure", deployFailure);
         }
+    }
+
+    private static void signalFailure(final DeploymentException ex, final DeployRequest deployRequest) {
+        LOGGER.error("Failed to deploy: {}", ex.getLocalizedMessage());
+        LOGGER.error("Failed request: {}", deployRequest);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Exception", ex);
+        }
+        LOGGER.info("Continuing with the rest of the deployment requests");
     }
 
     @Nullable
@@ -254,17 +253,17 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         RemoteRepository result = new RemoteRepository.Builder(repositoryId, "default", url).build();
 
         if (result.getAuthentication() == null || result.getProxy() == null) {
-            RemoteRepository.Builder builder = new RemoteRepository.Builder(result);
+            final RemoteRepository.Builder builder = new RemoteRepository.Builder(result);
 
             if (result.getAuthentication() == null) {
-                builder.setAuthentication(session.getRepositorySession()
+                builder.setAuthentication(this.session.getRepositorySession()
                         .getAuthenticationSelector()
                         .getAuthentication(result));
             }
 
             if (result.getProxy() == null) {
                 builder.setProxy(
-                        session.getRepositorySession().getProxySelector().getProxy(result));
+                    this.session.getRepositorySession().getProxySelector().getProxy(result));
             }
 
             result = builder.build();
@@ -274,7 +273,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     }
 
     private void deployOne(final DeployRequest deployRequest) throws DeploymentException {
-        int retryFailedDeploymentCounter = Math.max(1, Math.min(10, this.retryFailedDeploymentCount));
+        final int retryFailedDeploymentCounter = Math.max(1, Math.min(10, this.retryFailedDeploymentCount));
         DeploymentException exception = null;
         for (int count = 0; count < retryFailedDeploymentCounter; count++) {
             try {
@@ -282,10 +281,10 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     LOGGER.info("Retrying deployment attempt {} of {}", count + 1, retryFailedDeploymentCounter);
                 }
 
-                repositorySystem.deploy(session.getRepositorySession(), deployRequest);
+                this.repositorySystem.deploy(this.session.getRepositorySession(), deployRequest);
                 exception = null;
                 break;
-            } catch (DeploymentException e) {
+            } catch (final DeploymentException e) {
                 if (count + 1 < retryFailedDeploymentCounter) {
                     LOGGER.warn("Encountered issue during deployment: {}", e.getLocalizedMessage());
                     LOGGER.debug("Exception", e);
@@ -349,7 +348,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             }
 
             final Set<RequireBundle> requireBundles = sdkEntry.getRequireBundle();
-            for (RequireBundle rb : requireBundles) {
+            for (final RequireBundle rb : requireBundles) {
                 final String requiredBundleName = rb.bundle();
                 final SdkEntry requiredBundleSdkEntry = bsnMap.get(requiredBundleName);
                 if (requiredBundleSdkEntry == null) {
@@ -570,7 +569,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
         xml.writeStartElement("project");
         xml.writeAttribute(XSI_URL, "schemaLocation",
-                "http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+                "http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
         );
 
         xml.writeStartElement(mavenUri, "modelVersion");
