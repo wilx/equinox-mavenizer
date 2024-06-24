@@ -21,7 +21,7 @@
     <licenses>
         <license>
             <name>BSD 2-Clause License</name>
-            <url>https://raw.githubusercontent.com/wilx/equinox-mavenizer/master/LICENSE</url>
+            <url>https://raw.githubusercontent.com/wilx/equinox-mavenizer/master/LICENSE.txt</url>
             <distribution>repo</distribution>
         </license>
     </licenses>
