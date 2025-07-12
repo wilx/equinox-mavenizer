@@ -7,42 +7,11 @@ import com.github.wilx.equinox.mavenizer.maven.plugin.SdkEntry.RequireBundle;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.TreeMultimap;
 import com.sun.xml.txw2.output.IndentingXMLStreamWriter;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import javax.xml.stream.XMLOutputFactory;
-import javax.xml.stream.XMLStreamException;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.RepositoryUtils;
-import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -71,6 +40,36 @@ import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 @SuppressWarnings("unused")
 @Mojo(name = "equinox-mavenizer", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true)
@@ -230,11 +229,16 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         if (StringUtils.isNotBlank(this.deployRepositoryUrl)) {
             remoteRepository = getRemoteRepository(this.deployRepositoryId, this.deployRepositoryUrl);
         } else {
-            final List<ArtifactRepository> remoteRepositories = this.session.getRequest().getRemoteRepositories();
+            final List<RemoteRepository> remoteRepositories = this.project.getRemoteProjectRepositories();
             LOGGER.debug("Remote repositories:\n{}", remoteRepositories);
-            final Optional<ArtifactRepository> repoOpt = remoteRepositories.stream().filter(ar -> this.deployRepositoryId.equals(ar.getId())).findFirst();
-            remoteRepository = RepositoryUtils.toRepo(repoOpt.orElseThrow(
-                    () -> new MojoFailureException("deployRepositoryUrl was not specified but repository with ID " + this.deployRepositoryId + " was not found")));
+            remoteRepository = remoteRepositories
+                .stream()
+                .filter(ar -> this.deployRepositoryId.equals(ar.getId()))
+                .findFirst()
+                .orElseThrow(
+                    () -> new MojoFailureException(
+                        "deployRepositoryUrl was not specified but repository with ID "
+                        + this.deployRepositoryId + " was not found"));
         }
         return remoteRepository;
     }
@@ -371,7 +375,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final Set<ImportPackage> importPackages = sdkEntry.getImportPackage();
             for (final ImportPackage ip : importPackages) {
                 final Set<String> artifactIds = implementedBy.get(ip.pkg());
-                if (artifactIds != null && !artifactIds.isEmpty()) {
+                if (!artifactIds.isEmpty()) {
                     if (artifactIds.size() > 1) {
                         // There can be split packages which are both imported and exported in multiple bundles.
                         // To avoid cycles in dependencies, ignore these here and do not add a dependency.
