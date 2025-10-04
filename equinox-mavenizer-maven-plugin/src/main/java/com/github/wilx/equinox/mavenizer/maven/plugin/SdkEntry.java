@@ -17,6 +17,9 @@ class SdkEntry {
     Path pomFile;
     boolean isDSImpl;
     boolean requiresDS;
+    boolean isServiceLoaderImpl;
+    boolean requiresServiceLoader;
+    boolean hasBundleActivator;
 
     /**
      * Artifact ID of the dependency.
@@ -186,6 +189,34 @@ class SdkEntry {
 
     public void setRequiresDS(final boolean requiresDS) {
         this.requiresDS = requiresDS;
+    }
+
+    public boolean isServiceLoaderImpl() {
+        return this.isServiceLoaderImpl;
+    }
+
+    public void setServiceLoaderImpl(final boolean serviceLoaderImpl) {
+        this.isServiceLoaderImpl = serviceLoaderImpl;
+    }
+
+    public boolean isRequiresServiceLoader() {
+        return this.requiresServiceLoader;
+    }
+
+    public void setRequiresServiceLoader(boolean requiresServiceLoader) {
+        this.requiresServiceLoader = requiresServiceLoader;
+    }
+
+    public boolean hasBundleActivator() {
+        return this.hasBundleActivator;
+    }
+
+    public void setHasBundleActivator(final boolean hasBundleActivator) {
+        this.hasBundleActivator = hasBundleActivator;
+    }
+
+    public boolean isRequiresStart() {
+        return this.isDSImpl || this.requiresDS || this.hasBundleActivator || this.isServiceLoaderImpl || this.requiresServiceLoader;
     }
 
     public enum DependencyType {

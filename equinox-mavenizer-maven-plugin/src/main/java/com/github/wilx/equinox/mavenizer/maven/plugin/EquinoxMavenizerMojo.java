@@ -363,6 +363,19 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 dsImplementations.stream().map(SdkEntry::getArtifactId).toList());
         }
 
+        final List<SdkEntry> serviceLoaderImpls = mappedEntries
+            .values()
+            .stream()
+            .filter(SdkEntry::isServiceLoaderImpl)
+            .toList();
+        SdkEntry serviceLoaderImplEntry = null;
+        if (!serviceLoaderImpls.isEmpty()) {
+            serviceLoaderImplEntry = serviceLoaderImpls.get(0);
+        }
+        if (serviceLoaderImpls.size() > 1) {
+            LOGGER.warn("Found multiple ServiceLoader implementations: {}", serviceLoaderImpls);
+        }
+
 
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             // Add dependency based on fragment host.
@@ -390,6 +403,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     sdkEntry.addDependency(dsImplEntry.getArtifactId(), DependencyType.NORMAL);
                 } else {
                     LOGGER.warn("Could not find Declarative Services implementation for bundle {}", sdkEntry.getArtifactId());
+                }
+            }
+
+            if (sdkEntry.isRequiresServiceLoader()) {
+                if (serviceLoaderImplEntry != null) {
+                    sdkEntry.addDependency(serviceLoaderImplEntry.getArtifactId(), DependencyType.NORMAL);
+                } else {
+                    LOGGER.warn("Could not find Service Loader implementation for bundle {}", sdkEntry.getArtifactId());
                 }
             }
 
@@ -553,6 +574,12 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             }
 
             if (nlAfterDescOrName) {
+                xml.writeCharacters("\n");
+            }
+
+            if (sdkEntry.isRequiresStart()) {
+                xml.writeCharacters("\n");
+                xml.writeComment("This OSGi bundle requires to be started.");
                 xml.writeCharacters("\n");
             }
 
@@ -877,6 +904,12 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 sdkEntry.setRequiresDS(true);
             }
 
+            final ManifestElement[] bundleActivatorElements = parseManifestHeader(manifestMap, Constants.BUNDLE_ACTIVATOR);
+            if (bundleActivatorElements != null
+                && bundleActivatorElements.length > 0) {
+                sdkEntry.setHasBundleActivator(true);
+            }
+
             final ManifestElement[] provideCapabilityElements = parseManifestHeader(manifestMap, Constants.PROVIDE_CAPABILITY);
             if (provideCapabilityElements != null) {
                 for (final var capabilityLine : provideCapabilityElements) {
@@ -887,7 +920,22 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                             // This is Declarative Services implementation.
                             sdkEntry.setDSImpl(true);
                             LOGGER.info("Found DS implementation in {}", sdkEntry.getArtifactId());
+                        } else if (Strings.CS.equals(attribute, "osgi.serviceloader.registrar")
+                            || Strings.CS.equals(attribute, "osgi.serviceloader.processor")) {
+                            sdkEntry.setServiceLoaderImpl(true);
                         }
+                    } else if (value.equals("osgi.serviceloader")) {
+                        sdkEntry.setRequiresServiceLoader(true);
+                    }
+                }
+            }
+
+            final ManifestElement[] requireCapabilityElements = parseManifestHeader(manifestMap, Constants.REQUIRE_CAPABILITY);
+            if (requireCapabilityElements != null) {
+                for (final var requirementLine : requireCapabilityElements) {
+                    final var value = requirementLine.getValue();
+                    if (value.equals("osgi.serviceloader")) {
+                        sdkEntry.setRequiresServiceLoader(true);
                     }
                 }
             }
