@@ -31,7 +31,7 @@
                             <goal>wget</goal>
                         </goals>
                         <configuration>
-                            <url>https://mirror.dkm.cz/eclipse/eclipse/downloads/drops4/R-4.36-202505281830/repository-4.36.zip</url>
+                            <url>https://mirror.dkm.cz/eclipse/eclipse/downloads/drops4/R-4.37-202509050730/repository-4.37.zip</url>
                             <unpack>false</unpack>
                             <outputDirectory>${project.build.directory}</outputDirectory>
                             <outputFileName>repository.zip</outputFileName>
