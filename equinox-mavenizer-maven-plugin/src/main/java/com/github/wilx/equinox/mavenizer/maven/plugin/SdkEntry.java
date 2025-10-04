@@ -15,6 +15,9 @@ class SdkEntry {
     Path artifactPath;
     Path sourcesPath;
     Path pomFile;
+    boolean isDSImpl;
+    boolean requiresDS;
+
     /**
      * Artifact ID of the dependency.
      */
@@ -167,6 +170,22 @@ class SdkEntry {
 
     public void setFragmentHost(final String fragmentHost) {
         this.fragmentHost = fragmentHost;
+    }
+
+    public boolean isDSImpl() {
+        return this.isDSImpl;
+    }
+
+    public void setDSImpl(final boolean DSImpl) {
+        this.isDSImpl = DSImpl;
+    }
+
+    public boolean isRequiresDS() {
+        return this.requiresDS;
+    }
+
+    public void setRequiresDS(final boolean requiresDS) {
+        this.requiresDS = requiresDS;
     }
 
     public enum DependencyType {

@@ -12,6 +12,7 @@ import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.Strings;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -41,6 +42,7 @@ import org.osgi.framework.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
 import java.io.BufferedWriter;
@@ -83,8 +85,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project}", required = true, readonly = true)
     private MavenProject project;
 
-    @Component
-    private RepositorySystem repositorySystem;
+    private final RepositorySystem repositorySystem;
 
     @Parameter(defaultValue = "${session}", required = true, readonly = true)
     private MavenSession session;
@@ -120,6 +121,11 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private int artifactCounter = 0;
     private Path bomPath;
     private final String bomVersion = BOM_VERSION_FMT.format(Instant.now());
+
+    @Inject
+    public EquinoxMavenizerMojo(final RepositorySystem repositorySystem) {
+        this.repositorySystem = repositorySystem;
+    }
 
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -341,6 +347,23 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
     private static void analyzeDependencies(final Map<String, SdkEntry> mappedEntries,
             final Map<String, SdkEntry> bsnMap,
             final SetMultimap<String, String> implementedBy) {
+        // Find Declarative Services implementation bundle.
+        final List<SdkEntry> dsImplementations
+            = mappedEntries
+            .values()
+            .stream()
+            .filter(SdkEntry::isDSImpl)
+            .toList();
+        SdkEntry dsImplEntry = null;
+        if (!dsImplementations.isEmpty()) {
+            dsImplEntry = dsImplementations.get(0);
+        }
+        if (dsImplementations.size() > 1) {
+            LOGGER.warn("Found multiple Declarative Services implementations: {}",
+                dsImplementations.stream().map(SdkEntry::getArtifactId).toList());
+        }
+
+
         for (final SdkEntry sdkEntry : mappedEntries.values()) {
             // Add dependency based on fragment host.
             final String fragmentHost = sdkEntry.getFragmentHost();
@@ -360,6 +383,14 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                     continue;
                 }
                 sdkEntry.addDependency(requiredBundleSdkEntry.getArtifactId(), rb.dependencyType());
+            }
+
+            if (sdkEntry.isRequiresDS()) {
+                if (dsImplEntry != null) {
+                    sdkEntry.addDependency(dsImplEntry.getArtifactId(), DependencyType.NORMAL);
+                } else {
+                    LOGGER.warn("Could not find Declarative Services implementation for bundle {}", sdkEntry.getArtifactId());
+                }
             }
 
             // Map exports to providing artifactId.
@@ -686,7 +717,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             return Optional.empty();
         }
 
-        final String baseName = StringUtils.removeEnd(fileName, ".jar");
+        final String baseName = Strings.CI.removeEnd(fileName, ".jar");
         if (baseName.contains(".tests_")
             || baseName.contains(".tests.source_")) {
             // We don't care about Eclipse's and Equinox's own tests.
@@ -806,7 +837,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
             final ManifestElement[] dynamicImportPackages = parseManifestHeader(manifestMap, Constants.DYNAMICIMPORT_PACKAGE);
             for (final ManifestElement pkg : dynamicImportPackages) {
                 final String value = pkg.getValue();
-                if (!StringUtils.endsWith(value, "*")) {
+                if (!Strings.CS.endsWith(value, "*")) {
                     sdkEntry.addImportPackage(value, DependencyType.OPTIONAL);
                 }
             }
@@ -840,6 +871,26 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 }
                 sdkEntry.setFragmentHost(fragmentHostBSN);
             }
+
+            final ManifestElement[] serviceComponent = parseManifestHeader(manifestMap, "Service-Component");
+            if (serviceComponent != null && serviceComponent.length > 0) {
+                sdkEntry.setRequiresDS(true);
+            }
+
+            final ManifestElement[] provideCapabilityElements = parseManifestHeader(manifestMap, Constants.PROVIDE_CAPABILITY);
+            if (provideCapabilityElements != null) {
+                for (final var capabilityLine : provideCapabilityElements) {
+                    final var value = capabilityLine.getValue();
+                    if (value.equals("osgi.extender")) {
+                        final String attribute = capabilityLine.getAttribute("osgi.extender");
+                        if (Strings.CS.equals(attribute, "osgi.component")) {
+                            // This is Declarative Services implementation.
+                            sdkEntry.setDSImpl(true);
+                            LOGGER.info("Found DS implementation in {}", sdkEntry.getArtifactId());
+                        }
+                    }
+                }
+            }
         } catch (final IOException | BundleException e) {
             throw new MojoExecutionException(e.getMessage(), e);
         }
@@ -849,7 +900,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
 
     @NotNull
     private static DependencyType resolutionToDepType(final String resolutionValue) {
-        return StringUtils.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL;
+        return Strings.CI.equals(resolutionValue, Constants.RESOLUTION_OPTIONAL) ? DependencyType.OPTIONAL : DependencyType.NORMAL;
     }
 
     private static ManifestElement[] parseManifestHeader(@NotNull final Map<String, String> manifestMap,
