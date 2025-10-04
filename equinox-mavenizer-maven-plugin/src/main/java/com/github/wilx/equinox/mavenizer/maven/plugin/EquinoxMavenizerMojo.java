@@ -17,7 +17,6 @@ import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -37,6 +36,12 @@ import org.eclipse.osgi.internal.framework.EquinoxContainer;
 import org.eclipse.osgi.util.ManifestElement;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jgrapht.alg.TransitiveReduction;
+import org.jgrapht.alg.cycle.HawickJamesSimpleCycles;
+import org.jgrapht.graph.DefaultDirectedGraph;
+import org.jgrapht.graph.DefaultEdge;
+import org.jgrapht.graph.EdgeReversedGraph;
+import org.jgrapht.traverse.BreadthFirstIterator;
 import org.osgi.framework.BundleException;
 import org.osgi.framework.Constants;
 import org.slf4j.Logger;
@@ -145,6 +150,8 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         final SetMultimap<String, String> implementedBy = TreeMultimap.create();
         analyzeDependencies(mappedEntries, bsnMap, implementedBy);
 
+        detectDependencyCycles(mappedEntries);
+
         // Generate POM files with dependencies.
         generatePomFiles(mappedEntries);
 
@@ -158,6 +165,35 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
         if (this.deploy) {
             deployArtifacts(mappedEntries);
         }
+    }
+
+    private static void detectDependencyCycles(Map<String, SdkEntry> mappedEntries) throws MojoFailureException {
+        final var depGraph = buildDependencyGraph(mappedEntries);
+        final var cycleDetector = new HawickJamesSimpleCycles<>(depGraph);
+        final List<List<String>> simpleCycles = cycleDetector.findSimpleCycles();
+        if (! simpleCycles.isEmpty()) {
+            LOGGER.error("There are cycles in the dependency graph!");
+            for (final var cycle : simpleCycles) {
+                LOGGER.error("{}", cycle);
+            }
+            throw new MojoFailureException("There are cycles in the dependency graph!");
+        }
+    }
+
+
+    private static @NotNull DefaultDirectedGraph<String, DefaultEdge> buildDependencyGraph(
+        final Map<String, SdkEntry> mappedEntries) {
+        final var baseDepGraph = new DefaultDirectedGraph<String, DefaultEdge>(DefaultEdge.class);
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            baseDepGraph.addVertex(sdkEntry.getArtifactId());
+        }
+        for (final SdkEntry sdkEntry : mappedEntries.values()) {
+            final String sdkEntryArtifactId = sdkEntry.getArtifactId();
+            for (final Dependency dep : sdkEntry.getDependencies()) {
+                baseDepGraph.addEdge(sdkEntryArtifactId, dep.artifactId());
+            }
+        }
+        return baseDepGraph;
     }
 
     private void deployArtifacts(final Map<String, SdkEntry> mappedEntries) throws MojoExecutionException, MojoFailureException {
@@ -441,6 +477,7 @@ public class EquinoxMavenizerMojo extends AbstractMojo {
                 }
             }
         }
+
     }
 
     private void analyzeMetadata(final Map<String, SdkEntry> mappedEntries,

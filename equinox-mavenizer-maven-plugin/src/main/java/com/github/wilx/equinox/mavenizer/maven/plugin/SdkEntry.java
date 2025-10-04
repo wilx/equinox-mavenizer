@@ -96,6 +96,10 @@ class SdkEntry {
         if (artifactId.equals(this.getArtifactId())) {
             throw new RuntimeException("Self reference in dependencies: " + artifactId);
         }
+        if (this.artifactId.equals("org.eclipse.osgi")) {
+            // Don't add dependencies to the core OSGi bundle.
+            return;
+        }
 
         if (dependencyType == DependencyType.OPTIONAL) {
             if (!this.dependencies.contains(new Dependency(artifactId, DependencyType.NORMAL))) {
